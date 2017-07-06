@@ -69,6 +69,7 @@ delta(2,1:OPTIONS.N_t ) = 1;
 
 %% fault optimal cost finding
 % brach test
+% master change
 max_searchbit(1:2) = [4 7]; 
 for index_search = 1:1
     for operation_mode =  0:3
