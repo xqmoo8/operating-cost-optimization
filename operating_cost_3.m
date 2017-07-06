@@ -68,7 +68,7 @@ delta(2,1:OPTIONS.N_t ) = 1;
 % 7 (Fault w PPA w ESMC)
 
 %% fault optimal cost finding
-% brach test
+% branch test 2
 max_searchbit(1:2) = [4 7]; 
 for index_search = 1:1
     for operation_mode =  0:3
