@@ -199,7 +199,8 @@ end
 
 function [cvx_optval, Pg, Pb, Ppr ] = cost_optimization( delta, Redundent_switch, operation_mode )
 global OPTIONS Parameter
-%%
+
+%% Normal cost optimization (all the generator, ESM, and propulsion power in one part)
 if operation_mode <= 3
 %     cvx_begin
     cvx_begin quiet 
@@ -276,6 +277,7 @@ if operation_mode <= 3
                         + sum(Parameter.E(1,1)* power(Pb(1:2,1:OPTIONS.N_t),2) + Parameter.E(1,2)* power(Pb(1:2,1:OPTIONS.N_t),1) ,1) ,2 );
     cvx_optval = cvx_optval + y*Parameter.C_ss(1);
 
+%% in the fault mode (the power equipments in two island parts, the fault mode happens at time period 4)
 elseif operation_mode <= 7
 %     cvx_begin
     cvx_begin quiet 
@@ -388,24 +390,6 @@ elseif operation_mode <= 7
     cvx_optval = cvx_optval + y*Parameter.C_ss(1);
     
 end
-
-%     %% FIGURE PLOT
-%     figure
-%     hold on
-%     bar([ Pg(1,1:OPTIONS.N_t); Pg(2,1:OPTIONS.N_t); Pb(1,1:OPTIONS.N_t); Pb(2,1:OPTIONS.N_t)].','stacked');
-%     plot(Ppr(1:OPTIONS.N_t),'linewidth',1.5);
-%     plot(OPTIONS.P_L_TIME_on(1,1:OPTIONS.N_t),'linewidth',1.5);
-% 
-%     xlim([0 OPTIONS.N_t+1]);
-%     % ylim([0 10]);
-%     % plot([1 12], [P_prop P_prop], 'linewidth', 2, 'Color',[0.0,0.6,0.9]);
-%     % plot(1:12, P_load, 'linewidth', 2, 'Color',[0.67,0,1.0]);
-%     legend('P_{G1}','P_{G2}','P_{pr}','P_{l}','Orientation','horizontal');
-%     ylabel('Active Power (MW)');
-%     xlabel('Time (hours)');
-% 
-%     legend('P_{g_1}','P_{g_2}','P_{b_1}','P_{b_2}','P_{PR}','P_{L}');
-%     hold off
 
 end
          

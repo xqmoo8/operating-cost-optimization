@@ -31,7 +31,8 @@ Pb = zeros(2,OPTIONS.N_t);
 Redundent_switch(1,1:2) = [1 0];
 operation_mode = 3;
 
-for startup_index = 1:2^OPTIONS.N_t
+for startup_index = 1: 12+30
+    delta = starup_slot(startup_index);
     [result(startup_index), cvx_optval, Pg, Pb, Ppr, Pd] = total_cost_optimization( operation_mode, delta, Redundent_switch, Pg, Pb );
 end
 
@@ -102,9 +103,9 @@ OPTIONS.Coupled_load(2, :) = 1 * OPTIONS.P_L_TIME_off(1,1:OPTIONS.N_t)/6;
 % generator function parameters
 OPTIONS.G(1,1:3) = [10 30 220];
 OPTIONS.G(2,1:3) = [14.5 12 170];
-OPTIONS.E(1,1:3) = [1 90 0];
+OPTIONS.E(1:2,1:3) = [1 90 0; 1 90 0];
 OPTIONS.alpha = 1/6;
-OPTIONS.C_ss = 90;
+OPTIONS.C_ss = [90; 45];
 OPTIONS.R_G = 1;
 OPTIONS.error = 1e-3;
 
@@ -114,30 +115,57 @@ save('load_information');
 end
 
 function [delta] = starup_slot(startup_index)
-sequence = dec2bin(startup_index);
+global OPTIONS
 delta = ones(2, OPTIONS.N_t);
-for index = 1:size(sequence,2)
-    delta(index) = sequence(index)
+% one slot shutdown for two generators
+if startup_index <= 12
+    delta(startup_index) = 0;
+% two slots shutdown for two generators
+elseif startup_index <= 42
+    index = startup_index - 12;
+    delta(1,ceil(index/5)) = 0;
+    if mod(index-1,5)+1 < ceil(index/5)
+        delta(2,mod(index-1,5)+1) = 0;
+    elseif mod(index-1,5)+1 > ceil(index/5)
+        delta(2,mod(index-1,5)+2) = 0;
+    elseif mod(index-1,5)+1 == ceil(index/5)
+        delta(2,mod(index-1,5)+2) = 0;
+    end
+% % three slots shutdown for two generators
+% elseif startup_index <= 122
+%     index = startup_index - 42;
+%     delta(1,ceil(index/5)) = 0;
+%     if mod(index,5)<ceil(index/5)
+%         delta(2,mod(index,5)) = 0;
+%     elseif mod(index,5)>=ceil(index/5)
+%         delta(2,mod(index,5)+1) = 0;
+%     end
 end
+% disp(delta);
+% start_index = OPTIONS.N_t - size(sequence,2);
 end
 
 %% the subproblem which is used to calculate the optimal power of generators and ESMs
 function [objval_upperbound, cvx_optval, Pg, Pb, Ppr, Pd ] = total_cost_optimization( operation_mode, delta_s, Redundent_switch,  Pg_m, Pb )  
 global OPTIONS
 
+startup = (delta_s(1:2,2:end) - delta_s(1:2,1:end-1)>=1);
+
 cvx_begin
 % cvx_solver SeDuMi
-% cvx_begin quiet 
+cvx_begin quiet
     variable Ppr(1,OPTIONS.N_t) nonnegative
     variable Pb(2,OPTIONS.N_t)
     variable E(2,OPTIONS.N_t) nonnegative
 %     variable delta_s(OPTIONS.N_g, OPTIONS.N_t) binary
     variable Pd(2,OPTIONS.N_t) nonnegative
     variable Pg(OPTIONS.N_g, OPTIONS.N_t) nonnegative
-    minimize( sum(    sum(OPTIONS.G(1,1:2)* power(Pg(1:OPTIONS.N_g,1:OPTIONS.N_t),2) ,1) ...
-                    + sum(OPTIONS.G(2,1:2)* power(Pg(1:OPTIONS.N_g,1:OPTIONS.N_t),2) ,1) ...
-                    + sum(OPTIONS.E(1,1)* power(Pb(1:OPTIONS.N_g,1:OPTIONS.N_t),2) ,1) ...
-                    + sum(OPTIONS.D(1,1)* power(Pd(1:OPTIONS.N_g,1:OPTIONS.N_t),2) ,1)  ) )
+    minimize( sum(    sum(OPTIONS.G(1:2,1).'* power(Pg(1:OPTIONS.N_g,1:OPTIONS.N_t),2) ,2) ...
+                    + sum(OPTIONS.G(1:2,2).'* power(Pg(1:OPTIONS.N_g,1:OPTIONS.N_t),1) ,2) ...
+                    + sum(OPTIONS.G(1:2,3).'* delta_s ,2) ...
+                    + sum(OPTIONS.E(1:2,1).'* power(Pb(1:OPTIONS.N_e,1:OPTIONS.N_t),2) ,2) ...
+                    + sum(OPTIONS.E(1:2,2).'* ones(OPTIONS.N_g,OPTIONS.N_t) ,2) ...
+                    + sum(OPTIONS.C_ss(1:2,1).'* startup ,2)  ) )
 %                     + sum(OPTIONS.E(1,2)* power(Pb(1:OPTIONS.N_g,1:OPTIONS.N_t),1) ,1) ...
 %                     + sum(OPTIONS.E(1,2)* power(Pb(1,1:OPTIONS.N_t),1) ,1) ...
 %                     + sum(OPTIONS.E(2,2)* power(Pb(2,1:OPTIONS.N_t),1) ,1) ...
@@ -202,7 +230,6 @@ cvx_begin
                 ~Redundent_switch*OPTIONS.Coupled_load(:,t_index) + OPTIONS.alpha * OPTIONS.P_L_TIME_off(1,t_index)  == (Pg(2,t_index)) + Pb(2,t_index)
             end
         end
-%         Pd(:,:) == 0;
         
         % voyage planning            
         if operation_mode ==0
@@ -235,6 +262,8 @@ cvx_begin
         end
 cvx_end
 
+disp(cvx_optval);
+objval_upperbound= cvx_optval;
 
 y = size(find(delta_s(:,2:OPTIONS.N_t) - delta_s(:,1:OPTIONS.N_t-1)==1),2);
 objval_upperbound= cvx_optval + y*OPTIONS.C_ss(1) ...
@@ -242,10 +271,7 @@ objval_upperbound= cvx_optval + y*OPTIONS.C_ss(1) ...
                   + sum( OPTIONS.G(2,2)* Pg(2,1:OPTIONS.N_t),2) ... 
                   + sum( OPTIONS.G(1,3)* delta_s(1,1:OPTIONS.N_t),2) ... 
                   + sum( OPTIONS.G(2,3)* delta_s(2,1:OPTIONS.N_t),2) ,1);
-%                 + OPTIONS.E(1,2)*Pb(1:OPTIONS.N_e,1:OPTIONS.N_t) ,1),2); 
 
-%                     + OPTIONS.G(2,3)*delta(3:OPTIONS.N_g,1:OPTIONS.N_t);
-%                     + sum(sum(OPTIONS.G(1,2)*Pg(1:2,1:OPTIONS.N_t) 
 % %% FIGURE PLOT
 % figure
 % hold on
