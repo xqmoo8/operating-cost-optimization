@@ -27,29 +27,37 @@ delta_g = ones(OPTIONS.N_g,OPTIONS.N_t);
 Pg = zeros(2,OPTIONS.N_t);
 Pb = zeros(2,OPTIONS.N_t);
 Redundent_switch(1,1:2) = [1 0];
+objval_upperbound = 0;
+objval_lowerbound = 0;
 operation_mode = 3;
 
 % startup variable used in subproblem
 delta = ones(2, OPTIONS.N_t);
-[result(1), cvx_optval, Pg, Pb, Ppr, Pd] = total_cost_optimization( operation_mode, delta, Redundent_switch, Pg, Pb );
+[result(1), Pg, Pb, Ppr ] = total_cost_optimization( operation_mode, delta, Redundent_switch, Pg, Pb );
+[upperbound(1), cvx_optval, Pg, Pb, Ppr ] = optimization_subproblem( operation_mode, delta, Redundent_switch, Pg, Pb );
 
 for startup_index = 1: 12+30
     delta = starup_slot(startup_index);
-    [result(startup_index+1), cvx_optval, Pg, Pb, Ppr, Pd] = total_cost_optimization( operation_mode, delta, Redundent_switch, Pg, Pb );
+    [result(startup_index+1), Pg, Pb, Ppr ] = total_cost_optimization( operation_mode, delta, Redundent_switch, Pg, Pb );
+    [upperbound(startup_index+1), cvx_optval, Pg, Pb, Ppr ] = optimization_subproblem( operation_mode, delta, Redundent_switch, Pg, Pb );
 end
+
+save('result.mat','result');
+save('upperbound.mat','upperbound');
+
 
 % b_benders = 0;
 % for index_sm = 1:20
 %     for operation_mode = 7:7
-%         [objval_upperbound(index_sm), cvx_optval, Pg, Pb, Ppr, Pd] = cost_optimization_subproblem( operation_mode, delta, Redundent_switch, Pg, Pb );
+%         [objval_upperbound(index_sm), cvx_optval, Pg, Pb, Ppr, Pd] = optimization_subproblem( operation_mode, delta, Redundent_switch, Pg, Pb );
 %         if isnan(Pg(1,1))
 %             break;
 %         end
-%         [objval_lowerbound(index_sm), delta, Redundent_switch, Pg, b_benders ] = cost_optimization_masterproblem( operation_mode, delta, Redundent_switch, Pg, Pb, Ppr, Pd, cvx_optval, b_benders );
+%         [objval_lowerbound(index_sm), delta, Redundent_switch, Pg, b_benders ] = optimization_masterproblem( operation_mode, delta, Redundent_switch, Pg, Pb, Ppr, Pd, cvx_optval, b_benders );
 %         if isnan(Pg(1,1))
 %             break;
 %         end
-%         objval_upperbound(index_sm) - objval_lowerbound(index_sm)
+%         ul_error = objval_upperbound(index_sm) - objval_lowerbound(index_sm);
 %         if  objval_upperbound(index_sm) - objval_lowerbound(index_sm) < OPTIONS.error
 % %             break;
 %         end
@@ -81,6 +89,7 @@ OPTIONS.Pg_Min(1) = 1;
 OPTIONS.Pg_Max(2) = 4;
 OPTIONS.Pg_Min(2) = 0.5;
 
+OPTIONS.Xi = 1;
 OPTIONS.Ppr_Max = (OPTIONS.velocity(1)).^3*2.2e-3;
 OPTIONS.Pb_Max(1) = 1;
 OPTIONS.Pb_Min(1) = -1;
@@ -111,8 +120,8 @@ OPTIONS.C_ss = [90; 45];
 OPTIONS.R_G = 1;
 OPTIONS.error = 1e-3;
 
-load_information = [OPTIONS.P_L_TIME_off; OPTIONS.P_L_TIME_on; OPTIONS.Coupled_load];
-save('load_information');
+% load_information = [OPTIONS.P_L_TIME_off; OPTIONS.P_L_TIME_on; OPTIONS.Coupled_load];
+% save('load_information');
 
 end
 
@@ -149,10 +158,10 @@ end
 end
 
 %% the subproblem which is used to calculate the optimal power of generators and ESMs
-function [objval_upperbound, cvx_optval, Pg, Pb, Ppr, Pd ] = total_cost_optimization( operation_mode, delta_s, Redundent_switch,  Pg_m, Pb )  
+function [ cvx_optval, Pg, Pb, Ppr ] = total_cost_optimization( operation_mode, delta, Redundent_switch,  Pg_m, Pb )  
 global OPTIONS
 
-startup = (delta_s(1:2,2:end) - delta_s(1:2,1:end-1)>=1);
+startup = (delta(1:2,2:end) - delta(1:2,1:end-1)>=1);
 
 cvx_begin
 % cvx_solver SeDuMi
@@ -160,14 +169,113 @@ cvx_begin quiet
     variable Ppr(1,OPTIONS.N_t) nonnegative
     variable Pb(2,OPTIONS.N_t)
     variable E(2,OPTIONS.N_t) nonnegative
-    variable Pd(2,OPTIONS.N_t) nonnegative
     variable Pg(OPTIONS.N_g, OPTIONS.N_t) nonnegative
-    minimize( sum(    sum(OPTIONS.G(1:2,1).'* power(Pg(1:OPTIONS.N_g,1:OPTIONS.N_t),2) ,2) ...
-                    + sum(OPTIONS.G(1:2,2).'* power(Pg(1:OPTIONS.N_g,1:OPTIONS.N_t),1) ,2) ...
-                    + sum(OPTIONS.G(1:2,3).'* delta_s ,2) ...
-                    + sum(OPTIONS.E(1:2,1).'* power(Pb(1:OPTIONS.N_e,1:OPTIONS.N_t),2) ,2) ...
-                    + sum(OPTIONS.E(1:2,2).'* ones(OPTIONS.N_g,OPTIONS.N_t) ,2) ...
-                    + sum(OPTIONS.C_ss(1:2,1).'* startup ,2)  ) )
+    minimize( sum(OPTIONS.G(1,1) * delta(1,1:OPTIONS.N_t) * power(Pg(1,1:OPTIONS.N_t).',2) ,2) ...
+            + sum(OPTIONS.G(2,1) * delta(2,1:OPTIONS.N_t) * power(Pg(2,1:OPTIONS.N_t).',2) ,2) ...
+            + sum(OPTIONS.G(1,2) * delta(1,1:OPTIONS.N_t) * power(Pg(1,1:OPTIONS.N_t).',1) ,2) ...
+            + sum(OPTIONS.G(2,2) * delta(2,1:OPTIONS.N_t) * power(Pg(2,1:OPTIONS.N_t).',1) ,2) ...
+            + sum(OPTIONS.G(1,3) * delta(1,1:OPTIONS.N_t) ,2) ...
+            + sum(OPTIONS.G(2,3) * delta(2,1:OPTIONS.N_t) ,2) ...
+            + OPTIONS.Xi * sum(OPTIONS.E(1:2,1).'* power(Pb(1:OPTIONS.N_e,1:OPTIONS.N_t),2) ,2) ...
+            + OPTIONS.Xi * sum(OPTIONS.E(1:2,2).'* ones(OPTIONS.N_g,OPTIONS.N_t) ,2) ...
+            + sum(OPTIONS.C_ss(1:2,1).'* startup ,2) )
+ 
+    subject to
+        % the range constraints of all the variables
+        Pg(1,1:OPTIONS.N_t) <= delta(1,1:OPTIONS.N_t) * OPTIONS.Pg_Max(1)
+        Pg(2,1:OPTIONS.N_t) <= delta(2,1:OPTIONS.N_t) * OPTIONS.Pg_Max(2)
+        Pg(1,1:OPTIONS.N_t) >= delta(1,1:OPTIONS.N_t) * OPTIONS.Pg_Min(1)
+        Pg(2,1:OPTIONS.N_t) >= delta(2,1:OPTIONS.N_t) * OPTIONS.Pg_Min(2)
+
+        % ramping rate power of generators
+        Pg(1,2:OPTIONS.N_t) -Pg(1,1:OPTIONS.N_t-1) <= OPTIONS.R_G
+        Pg(1,2:OPTIONS.N_t) -Pg(1,1:OPTIONS.N_t-1) >= -OPTIONS.R_G
+        Pg(2,2:OPTIONS.N_t) -Pg(2,1:OPTIONS.N_t-1) <= OPTIONS.R_G
+        Pg(2,2:OPTIONS.N_t) -Pg(2,1:OPTIONS.N_t-1) >= -OPTIONS.R_G
+
+        % propulsion power limitation
+        Ppr(1,1:OPTIONS.N_t) <= OPTIONS.Ppr_Max * ones(1,OPTIONS.N_t)
+        
+        % ESM limitation
+        Pb(1,1:OPTIONS.N_t) <= OPTIONS.Pb_Max * ones(1,OPTIONS.N_t)
+        Pb(2,1:OPTIONS.N_t) <= OPTIONS.Pb_Max * ones(1,OPTIONS.N_t)
+        Pb(1,1:OPTIONS.N_t) >= OPTIONS.Pb_Min * ones(1,OPTIONS.N_t)
+        Pb(2,1:OPTIONS.N_t) >= OPTIONS.Pb_Min * ones(1,OPTIONS.N_t)
+        
+        % charging and discharging
+        E(1,1:OPTIONS.N_t) <=  OPTIONS.E_Max(1) * ones(1,OPTIONS.N_t)
+        E(2,1:OPTIONS.N_t) <=  OPTIONS.E_Max(2) * ones(1,OPTIONS.N_t)
+        E(1,1:OPTIONS.N_t) >= zeros(1,OPTIONS.N_t)
+        E(2,1:OPTIONS.N_t) >= zeros(1,OPTIONS.N_t)
+        
+        % ESM output power and the capacity constraints
+        OPTIONS.E_Max(1) - Pb(1,1) == E(1,1)
+        OPTIONS.E_Max(2) - Pb(2,1) == E(2,1)
+        for t_index = 1:OPTIONS.N_t-1
+            E(1,t_index) - Pb(1,t_index+1) == E(1,t_index+1)
+            E(2,t_index) - Pb(2,t_index+1) == E(2,t_index+1)
+        end
+        
+        % system power balance
+        if operation_mode <= 3 
+            for t_index = 1:OPTIONS.N_t
+                 OPTIONS.P_L_TIME_off(1,t_index) + Ppr(1,t_index) == sum( Pg(1:OPTIONS.N_g,t_index) ) + sum(Pb(1:OPTIONS.N_e,t_index))
+            end
+        elseif operation_mode <= 7
+            for t_index = 1:OPTIONS.N_t
+                Redundent_switch*OPTIONS.Coupled_load(:,t_index) +  (1-OPTIONS.alpha - 2/6) * OPTIONS.P_L_TIME_off(1,t_index) + Ppr(1,t_index) == (Pg(1,t_index)) + Pb(1,t_index) 
+                ~Redundent_switch*OPTIONS.Coupled_load(:,t_index) + OPTIONS.alpha * OPTIONS.P_L_TIME_off(1,t_index)  == (Pg(2,t_index)) + Pb(2,t_index)
+            end
+        end
+        
+        % voyage planning            
+        if operation_mode ==0
+            Ppr(1,1:OPTIONS.N_t) == OPTIONS.P_pr_avg;
+            Pb(1:2,1:OPTIONS.N_t) == 0
+        elseif operation_mode ==1
+            sum((Ppr(1:OPTIONS.N_t)./2.2e-3).^(1/3)) >= OPTIONS.Distance
+        elseif operation_mode ==2
+            Ppr(1,1:OPTIONS.N_t) == OPTIONS.P_pr_avg;
+        elseif operation_mode ==3
+            sum((Ppr(1:OPTIONS.N_t)./2.2e-3).^(1/3)) >= OPTIONS.Distance 
+        elseif operation_mode ==4
+            Ppr(1,1:OPTIONS.N_t) == OPTIONS.P_pr_avg;
+            Pb(1:2,1:OPTIONS.N_t) == 0
+        elseif operation_mode ==5
+            sum((Ppr(1:OPTIONS.N_t)./2.2e-3).^(1/3)) >= OPTIONS.Distance
+            Pb(1:2,1:OPTIONS.N_t) == 0
+        elseif operation_mode ==6
+            Ppr(1,1:OPTIONS.N_t) == OPTIONS.P_pr_avg;
+        else
+            sum((Ppr(5:OPTIONS.N_t)./2.2e-3).^(1/3)) >= OPTIONS.Distance - 4*( OPTIONS.P_pr_avg ./2.2e-3).^(1/3)
+        end
+cvx_end
+
+disp('optimal');
+disp(cvx_optval);
+
+end
+
+%% the subproblem which is used to calculate the optimal power of generators and ESMs
+function [objval_upperbound, cvx_optval, Pg, Pb, Ppr ] = optimization_subproblem( operation_mode, delta_s, Redundent_switch,  Pg_m, Pb )  
+global OPTIONS
+
+lowerbound(1,:) = delta_s(1,1:OPTIONS.N_t) * OPTIONS.Pg_Min(1);
+lowerbound(2,:) = delta_s(2,1:OPTIONS.N_t) * OPTIONS.Pg_Min(2);
+
+cvx_begin
+% cvx_solver SeDuMi
+cvx_begin quiet
+    variable Ppr(1,OPTIONS.N_t) nonnegative
+    variable Pb(2,OPTIONS.N_t)
+    variable E(2,OPTIONS.N_t) nonnegative
+    variable Pg(OPTIONS.N_g, OPTIONS.N_t) nonnegative
+    minimize( sum(OPTIONS.G(1,1) * delta_s(1,1:OPTIONS.N_t) * power(Pg(1,1:OPTIONS.N_t).',2) ,2) ...
+            + sum(OPTIONS.G(2,1) * delta_s(2,1:OPTIONS.N_t) * power(Pg(2,1:OPTIONS.N_t).',2) ,2) ...
+            + sum(OPTIONS.G(1,2) * delta_s(1,1:OPTIONS.N_t) * power(Pg(1,1:OPTIONS.N_t).',1) ,2) ...
+            + sum(OPTIONS.G(2,2) * delta_s(2,1:OPTIONS.N_t) * power(Pg(2,1:OPTIONS.N_t).',1) ,2) ...
+            + OPTIONS.Xi * sum(OPTIONS.E(1:2,1).'* power(Pb(1:OPTIONS.N_e,1:OPTIONS.N_t),2) ,2) ...
+            + OPTIONS.Xi * sum(OPTIONS.E(1:2,2).'* ones(OPTIONS.N_g,OPTIONS.N_t) ,2)  )
  
     subject to
         % the range constraints of all the variables
@@ -240,159 +348,20 @@ cvx_begin quiet
         end
 cvx_end
 
-disp(cvx_optval);
-objval_upperbound = cvx_optval;
 
-% y = size(find(delta_s(:,2:OPTIONS.N_t) - delta_s(:,1:OPTIONS.N_t-1)==1),2);
+startup = (delta_s(1:2,2:OPTIONS.N_t) - delta_s(1:2,1:OPTIONS.N_t-1)>=1);
+startup_cost = sum(OPTIONS.C_ss(1:2,1).'* startup ,2);
+one_item_cost = sum(OPTIONS.G(1,3) * delta_s(1,1:OPTIONS.N_t) ,2) + sum(OPTIONS.G(2,3) * delta_s(2,1:OPTIONS.N_t) ,2);
 
-% %% FIGURE PLOT
-% figure
-% hold on
-% bar([ Pg(1,1:OPTIONS.N_t); Pg(2,1:OPTIONS.N_t); Pb(1,1:OPTIONS.N_t); Pb(2,1:OPTIONS.N_t)].','stacked');
-% plot(Ppr(1:OPTIONS.N_t),'linewidth',1.5);
-% plot(OPTIONS.P_L_TIME_off(1,1:OPTIONS.N_t),'linewidth',1.5);
-% 
-% xlim([0 OPTIONS.N_t+1]);
-% legend('P_{G1}','P_{G2}','P_{pr}','P_{l}','Orientation','horizontal');
-% ylabel('Active Power (MW)');
-% xlabel('Time (hours)');
-% 
-% legend('P_{g_1}','P_{g_2}','P_{b_1}','P_{b_2}','P_{PR}','P_{L}');
-% hold off
+objval_upperbound = cvx_optval + startup_cost + one_item_cost;
+
+disp('upperbound');
+disp(objval_upperbound);
 
 end
-
-%% the subproblem which is used to calculate the optimal power of generators and ESMs
-function [objval_upperbound, cvx_optval, Pg, Pb, Ppr, Pd ] = cost_optimization_subproblem( operation_mode, delta_s, Redundent_switch,  Pg_m, Pb )  
-global OPTIONS
-
-lowerbound(1,:) = delta_s(1,1:OPTIONS.N_t) * OPTIONS.Pg_Min(1);
-lowerbound(2,:) = delta_s(2,1:OPTIONS.N_t) * OPTIONS.Pg_Min(2);
-
-cvx_begin
-% cvx_solver SeDuMi
-% cvx_begin quiet 
-    variable Ppr(1,OPTIONS.N_t) nonnegative
-    variable Pb(2,OPTIONS.N_t)
-    variable E(2,OPTIONS.N_t) nonnegative
-%     variable delta_s(OPTIONS.N_g, OPTIONS.N_t) binary
-    variable Pd(2,OPTIONS.N_t) nonnegative
-    variable Pg(OPTIONS.N_g, OPTIONS.N_t) nonnegative
-
-    minimize( sum(    sum(OPTIONS.G(1:2,1).'* power(Pg(1:OPTIONS.N_g,1:OPTIONS.N_t),2) ,2) ...
-                    + sum(OPTIONS.G(1:2,2).'* power(Pg(1:OPTIONS.N_g,1:OPTIONS.N_t),1) ,2) ...
-                    + sum(OPTIONS.G(1:2,3).'* delta_s ,2) ...
-                    + sum(OPTIONS.E(1:2,1).'* power(Pb(1:OPTIONS.N_e,1:OPTIONS.N_t),2) ,2) ...
-                    + sum(OPTIONS.E(1:2,2).'* ones(OPTIONS.N_g,OPTIONS.N_t) ,2) ...
-                    + sum(OPTIONS.C_ss(1:2,1).'* startup ,2)  ) )
-                
-    subject to
-        % the range constraints of all the variables
-        Pg(1,1:OPTIONS.N_t) <= delta_s(1,1:OPTIONS.N_t) * OPTIONS.Pg_Max(1)
-        Pg(2,1:OPTIONS.N_t) <= delta_s(2,1:OPTIONS.N_t) * OPTIONS.Pg_Max(2)
-        Pg(1,1:OPTIONS.N_t) >= delta_s(1,1:OPTIONS.N_t) * OPTIONS.Pg_Min(1)
-        Pg(2,1:OPTIONS.N_t) >= delta_s(2,1:OPTIONS.N_t) * OPTIONS.Pg_Min(2)
-
-        Pg(1,2:OPTIONS.N_t) -Pg(1,1:OPTIONS.N_t-1) <= OPTIONS.R_G
-        Pg(1,2:OPTIONS.N_t) -Pg(1,1:OPTIONS.N_t-1) >= -OPTIONS.R_G
-        Pg(2,2:OPTIONS.N_t) -Pg(2,1:OPTIONS.N_t-1) <= OPTIONS.R_G
-        Pg(2,2:OPTIONS.N_t) -Pg(2,1:OPTIONS.N_t-1) >= -OPTIONS.R_G
-
-        Ppr(1,1:OPTIONS.N_t) <= OPTIONS.Ppr_Max * ones(1,OPTIONS.N_t)
-        
-        Pb(1,1:OPTIONS.N_t) <= OPTIONS.Pb_Max * ones(1,OPTIONS.N_t)
-        Pb(2,1:OPTIONS.N_t) <= OPTIONS.Pb_Max * ones(1,OPTIONS.N_t)
-        Pb(1,1:OPTIONS.N_t) >= OPTIONS.Pb_Min * ones(1,OPTIONS.N_t)
-        Pb(2,1:OPTIONS.N_t) >= OPTIONS.Pb_Min * ones(1,OPTIONS.N_t)
-        
-        E(1,1:OPTIONS.N_t) <=  OPTIONS.E_Max(1) * ones(1,OPTIONS.N_t)
-        E(2,1:OPTIONS.N_t) <=  OPTIONS.E_Max(2) * ones(1,OPTIONS.N_t)
-        E(1,1:OPTIONS.N_t) >= zeros(1,OPTIONS.N_t)
-        E(2,1:OPTIONS.N_t) >= zeros(1,OPTIONS.N_t)
-        
-        % ESM output power and the capacity constraints
-        OPTIONS.E_Max(1) - Pb(1,1) == E(1,1)
-        OPTIONS.E_Max(2) - Pb(2,1) == E(2,1)
-        for t_index = 1:OPTIONS.N_t-1
-            E(1,t_index) - Pb(1,t_index+1) == E(1,t_index+1)
-            E(2,t_index) - Pb(2,t_index+1) == E(2,t_index+1)
-        end
-        
-        % system power balance
-        if operation_mode <= 3 
-            for t_index = 1:OPTIONS.N_t
-                 OPTIONS.P_L_TIME_off(1,t_index) + Ppr(1,t_index) == sum( Pg(1:OPTIONS.N_g,t_index) ) + sum(Pb(1:OPTIONS.N_e,t_index))
-            end
-        elseif operation_mode <= 7
-            for t_index = 1:OPTIONS.N_t
-%                 Redundent_switch*OPTIONS.Coupled_load(:,t_index) +  (1-OPTIONS.alpha - 2/6) * OPTIONS.P_L_TIME_off(1,t_index) + Ppr(1,t_index) == sum(Pg(1,t_index)) + Pb(1,t_index) + Pd(1,t_index)
-%                 ~Redundent_switch*OPTIONS.Coupled_load(:,t_index) + OPTIONS.alpha * OPTIONS.P_L_TIME_off(1,t_index)  == sum(Pg(2,t_index)) + Pb(2,t_index) + Pd(2,t_index)
-                Redundent_switch*OPTIONS.Coupled_load(:,t_index) +  (1-OPTIONS.alpha - 2/6) * OPTIONS.P_L_TIME_off(1,t_index) + Ppr(1,t_index) == (Pg(1,t_index)) + Pb(1,t_index) 
-                ~Redundent_switch*OPTIONS.Coupled_load(:,t_index) + OPTIONS.alpha * OPTIONS.P_L_TIME_off(1,t_index)  == (Pg(2,t_index)) + Pb(2,t_index)
-            end
-        end
-%         Pd(:,:) == 0;
-        
-        % voyage planning            
-        if operation_mode ==0
-            Ppr(1,1:OPTIONS.N_t) == OPTIONS.P_pr_avg;
-            Pb(1:2,1:OPTIONS.N_t) == 0
-        elseif operation_mode ==1
-            sum((Ppr(1:OPTIONS.N_t)./2.2e-3).^(1/3)) >= OPTIONS.Distance
-%             Pb(1:2,1:OPTIONS.N_t) == 0
-        elseif operation_mode ==2
-            Ppr(1,1:OPTIONS.N_t) == OPTIONS.P_pr_avg;
-        elseif operation_mode ==3
-            sum((Ppr(1:OPTIONS.N_t)./2.2e-3).^(1/3)) >= OPTIONS.Distance 
-        elseif operation_mode ==4
-            Ppr(1,1:OPTIONS.N_t) == OPTIONS.P_pr_avg;
-            Pb(1:2,1:OPTIONS.N_t) == 0
-        elseif operation_mode ==5
-            sum((Ppr(1:OPTIONS.N_t)./2.2e-3).^(1/3)) >= OPTIONS.Distance
-%             sum((Ppr(5:OPTIONS.N_t)./2.2e-3).^(1/3)) >= OPTIONS.Distance - 4*( OPTIONS.P_pr_avg ./2.2e-3).^(1/3)
-%             Ppr(1,1:4) == OPTIONS.P_pr_avg 
-            Pb(1:2,1:OPTIONS.N_t) == 0
-        elseif operation_mode ==6
-            Ppr(1,1:OPTIONS.N_t) == OPTIONS.P_pr_avg;
-%             sum((Ppr(1:OPTIONS.N_t)./2.2e-3).^(1/3)) >= OPTIONS.Distance 
-%             Ppr(1,1:OPTIONS.N_t) == OPTIONS.P_pr_avg;
-%             Pb(1:2,1:4) == 0
-        else
-            sum((Ppr(5:OPTIONS.N_t)./2.2e-3).^(1/3)) >= OPTIONS.Distance - 4*( OPTIONS.P_pr_avg ./2.2e-3).^(1/3)
-%             Ppr(1,1:4) == OPTIONS.P_pr_avg
-%             Pb(1:2,1:4) == 0
-        end
-cvx_end
-
-
-y = size(find(delta_s(:,2:OPTIONS.N_t) - delta_s(:,1:OPTIONS.N_t-1)==1),2);
-objval_upperbound= cvx_optval + y*OPTIONS.C_ss(1) ...
-                  + sum(  sum( OPTIONS.G(1,2)* Pg(1,1:OPTIONS.N_t),2) ...
-                  + sum( OPTIONS.G(2,2)* Pg(2,1:OPTIONS.N_t),2) ... 
-                  + sum( OPTIONS.G(1,3)* delta_s(1,1:OPTIONS.N_t),2) ... 
-                  + sum( OPTIONS.G(2,3)* delta_s(2,1:OPTIONS.N_t),2) ,1);
-%                 + OPTIONS.E(1,2)*Pb(1:OPTIONS.N_e,1:OPTIONS.N_t) ,1),2); 
-
-% %% FIGURE PLOT
-% figure
-% hold on
-% bar([ Pg(1,1:OPTIONS.N_t); Pg(2,1:OPTIONS.N_t); Pb(1,1:OPTIONS.N_t); Pb(2,1:OPTIONS.N_t)].','stacked');
-% plot(Ppr(1:OPTIONS.N_t),'linewidth',1.5);
-% plot(OPTIONS.P_L_TIME_off(1,1:OPTIONS.N_t),'linewidth',1.5);
-% 
-% xlim([0 OPTIONS.N_t+1]);
-% legend('P_{G1}','P_{G2}','P_{pr}','P_{l}','Orientation','horizontal');
-% ylabel('Active Power (MW)');
-% xlabel('Time (hours)');
-% 
-% legend('P_{g_1}','P_{g_2}','P_{b_1}','P_{b_2}','P_{PR}','P_{L}');
-% hold off
-
-end
-
 
 %% the master problem which is used to determine the redundent switches and ??
-function [objval_lowerbound, delta_g, Redundent_switch, Pg_m, b_benders ] = cost_optimization_masterproblem( operation_mode, delta, Redundent_switch, Pg, Pb, Ppr, Pd, cvx_optval_sub, b_benders )
+function [objval_lowerbound, delta_g, Redundent_switch, Pg_m, b_benders ] = optimization_masterproblem( operation_mode, delta, Redundent_switch, Pg, Pb, Ppr, Pd, cvx_optval_sub, b_benders )
 global OPTIONS
 
 %% dual variable and upperbound
