@@ -33,7 +33,7 @@ objval_lowerbound = 0;
 % startup variable used in subproblem
 delta = ones(2, OPTIONS.N_t);
 [result(1), Pg, Pb, Ppr ] = total_cost_optimization( operation_mode, delta, Redundent_switch, Pg, Pb );
-[upperbound(1), sub_optval, Pg, Pb, Ppr ] = optimization_subproblem( operation_mode, delta, Redundent_switch, Pg, Pb );
+[upperbound(1), sub_optval, Pg, Pb, Ppr, ds1, ds2 ] = optimization_subproblem( operation_mode, delta, Redundent_switch, Pg, Pb );
 [objval_lowerbound(1), delta, Redundent_switch, Pg, b_benders ] = optimization_masterproblem( operation_mode, delta, Redundent_switch, Pg, Pb, Ppr, sub_optval);
 
 
@@ -259,11 +259,11 @@ disp(cvx_optval);
 end
 
 %% the subproblem which is used to calculate the optimal power of generators and ESMs
-function [objval_upperbound, cvx_optval, Pg, Pb, Ppr ] = optimization_subproblem( operation_mode, delta_s, Redundent_switch,  Pg_m, Pb )  
+function [objval_upperbound, cvx_optval, Pg, Pb, Ppr, ds1, ds2  ] = optimization_subproblem( operation_mode, delta, Redundent_switch,  Pg_m, Pb )  
 global OPTIONS
 
-lowerbound(1,:) = delta_s(1,1:OPTIONS.N_t) * OPTIONS.Pg_Min(1);
-lowerbound(2,:) = delta_s(2,1:OPTIONS.N_t) * OPTIONS.Pg_Min(2);
+lowerbound(1,:) = delta(1,1:OPTIONS.N_t) * OPTIONS.Pg_Min(1);
+lowerbound(2,:) = delta(2,1:OPTIONS.N_t) * OPTIONS.Pg_Min(2);
 
 cvx_begin
 % cvx_solver SeDuMi
@@ -272,10 +272,13 @@ cvx_begin quiet
     variable Pb(2,OPTIONS.N_t)
     variable E(2,OPTIONS.N_t) nonnegative
     variable Pg(OPTIONS.N_g, OPTIONS.N_t) nonnegative
-    minimize( sum(OPTIONS.G(1,1) * delta_s(1,1:OPTIONS.N_t) * power(Pg(1,1:OPTIONS.N_t).',2) ,2) ...
-            + sum(OPTIONS.G(2,1) * delta_s(2,1:OPTIONS.N_t) * power(Pg(2,1:OPTIONS.N_t).',2) ,2) ...
-            + sum(OPTIONS.G(1,2) * delta_s(1,1:OPTIONS.N_t) * power(Pg(1,1:OPTIONS.N_t).',1) ,2) ...
-            + sum(OPTIONS.G(2,2) * delta_s(2,1:OPTIONS.N_t) * power(Pg(2,1:OPTIONS.N_t).',1) ,2) ...
+    variable delta_s(OPTIONS.N_g,OPTIONS.N_t)
+    dual variable ds1
+    dual variable ds2
+    minimize( sum(OPTIONS.G(1,1) * power(Pg(1,1:OPTIONS.N_t).',2) ,1) ...
+            + sum(OPTIONS.G(2,1) * power(Pg(2,1:OPTIONS.N_t).',2) ,1) ...
+            + sum(OPTIONS.G(1,2) * power(Pg(1,1:OPTIONS.N_t).',1) ,1) ...
+            + sum(OPTIONS.G(2,2) * power(Pg(2,1:OPTIONS.N_t).',1) ,1) ...
             + OPTIONS.Xi * sum(OPTIONS.E(1:2,1).'* power(Pb(1:OPTIONS.N_e,1:OPTIONS.N_t),2) ,2) ...
             + OPTIONS.Xi * sum(OPTIONS.E(1:2,2).'* ones(OPTIONS.N_g,OPTIONS.N_t) ,2)  )
  
@@ -285,7 +288,10 @@ cvx_begin quiet
         Pg(2,1:OPTIONS.N_t) <= delta_s(2,1:OPTIONS.N_t) * OPTIONS.Pg_Max(2)
         Pg(1,1:OPTIONS.N_t) >= delta_s(1,1:OPTIONS.N_t) * OPTIONS.Pg_Min(1)
         Pg(2,1:OPTIONS.N_t) >= delta_s(2,1:OPTIONS.N_t) * OPTIONS.Pg_Min(2)
-
+        
+        ds1 : delta_s(1,1:OPTIONS.N_t) == delta(1,1:OPTIONS.N_t)
+        ds2 : delta_s(2,1:OPTIONS.N_t) == delta(2,1:OPTIONS.N_t)
+        
         % ramping rate power of generators
         Pg(1,2:OPTIONS.N_t) -Pg(1,1:OPTIONS.N_t-1) <= OPTIONS.R_G
         Pg(1,2:OPTIONS.N_t) -Pg(1,1:OPTIONS.N_t-1) >= -OPTIONS.R_G
@@ -349,7 +355,6 @@ cvx_begin quiet
             sum((Ppr(5:OPTIONS.N_t)./2.2e-3).^(1/3)) >= OPTIONS.Distance - 4*( OPTIONS.P_pr_avg ./2.2e-3).^(1/3)
         end
 cvx_end
-
 
 startup = (delta_s(1:2,2:OPTIONS.N_t) - delta_s(1:2,1:OPTIONS.N_t-1)>=1);
 startup_cost = sum(OPTIONS.C_ss(1:2,1).'* startup ,2);
