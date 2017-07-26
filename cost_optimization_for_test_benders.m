@@ -1,4 +1,4 @@
-function [optimal_cost_comparison ] = cost_optimization_benders_2G_2E_cvx( voya_distance )
+function [optimal_cost_comparison ] = cost_optimization_for_test_benders( voya_distance )
 global OPTIONS
  
 if ~exist('voya_distance', 'var')
@@ -20,51 +20,83 @@ operation_mode = 3;
 
 initial_parameters();
 
-lambda_delta = zeros(OPTIONS.N_g,OPTIONS.N_t);
-lambda_Pg = zeros(OPTIONS.N_g,OPTIONS.N_t);
 % startup variable used in master problem
-delta_g = ones(OPTIONS.N_g,OPTIONS.N_t);
 Pg = zeros(2,OPTIONS.N_t);
 Pb = zeros(2,OPTIONS.N_t);
-Redundent_switch(1,1:2) = [1 0];
+delta = ones(2, OPTIONS.N_t);
+redundent_sw = [1 0; 0 1];
 objval_upperbound = 0;
 objval_lowerbound = 0;
+benders_cut_lowerbound = 0;
 
-% startup variable used in subproblem
-delta = ones(2, OPTIONS.N_t);
-[result(1), Pg, Pb, Ppr ] = total_cost_optimization( operation_mode, delta, Redundent_switch, Pg, Pb );
-[upperbound(1), sub_optval, Pg, Pb, Ppr, ds1, ds2 ] = optimization_subproblem( operation_mode, delta, Redundent_switch, Pg, Pb );
-[objval_lowerbound(1), delta, Redundent_switch, Pg, b_benders ] = optimization_masterproblem( operation_mode, delta, Redundent_switch, Pg, Pb, Ppr, sub_optval);
+% % test code for benders decompostion
+% delta = ones(2, OPTIONS.N_t);
+% [objval_upperbound, sub_optval, dual_delta, dual_switch, Pg, Pb, Ppr ] = optimization_subproblem( operation_mode, delta, redundent_sw, Pg, Pb );
+% total_sub(1).sub_optval = sub_optval;
+% total_sub(1).delta = delta;
+% total_sub(1).redundent_sw = redundent_sw;
+% total_dual(1).delta = dual_delta;
+% total_dual(1).switch = dual_switch;
+% [objval_lowerbound(1), delta, redundent_sw ] = optimization_masterproblem( operation_mode, total_sub, total_dual );
+
+% % benchmark for testing benders optimization
+% delta = ones(2, OPTIONS.N_t);
+% [result_benchmark(1), Pg, Pb, Ppr ] = total_cost_optimization( operation_mode, delta, redundent_sw, Pg, Pb );
+% for startup_index = 1: 12+30
+%     delta = starup_slot(startup_index);
+%     [result_benchmark(startup_index+1), Pg, Pb, Ppr ] = total_cost_optimization( operation_mode, delta, redundent_sw, Pg, Pb );
+% end
 
 
-for startup_index = 1: 12+30
-    delta = starup_slot(startup_index);
-    [result(startup_index+1), Pg, Pb, Ppr ] = total_cost_optimization( operation_mode, delta, Redundent_switch, Pg, Pb );
-    [upperbound(startup_index+1), cvx_optval, Pg, Pb, Ppr ] = optimization_subproblem( operation_mode, delta, Redundent_switch, Pg, Pb );
-    [objval_lowerbound(startup_index+1), delta, Redundent_switch, Pg, b_benders ] = optimization_masterproblem( operation_mode, delta, Redundent_switch, Pg, Pb, Ppr, Pd, cvx_optval, b_benders );
+for benders_index = 1: 100
+%     for subproblem_index = 1:13
+%         if subproblem_index == 1
+%             delta = ones(2, OPTIONS.N_t);
+%         else
+%             delta = starup_slot(subproblem_index-1);
+%         end
+%         % sub_problem optimization based on benders decomposition
+%         [objval_upperbound(subproblem_index), sub_optval, dual_delta, dual_switch, Pg, Pb, Ppr ] = optimization_subproblem( operation_mode, delta, redundent_sw );
+%         % storage and passing of objective value and dual variable 
+%         total_sub(subproblem_index).sub_optval = sub_optval;
+%         total_sub(subproblem_index).delta = delta;
+%         total_sub(subproblem_index).redundent_sw = redundent_sw;
+%         total_dual(subproblem_index).delta = dual_delta;
+%         total_dual(subproblem_index).switch = dual_switch;
+%     end
+    
+    % sub_problem optimization based on benders decomposition
+    [objval_upperbound(benders_index), sub_optval, dual_delta, dual_switch, Pg, Pb, Ppr ] = optimization_subproblem( operation_mode, delta, redundent_sw );
+    % storage and passing of objective value and dual variable 
+    total_sub(benders_index).sub_optval = sub_optval;
+    total_sub(benders_index).delta = delta;
+    total_sub(benders_index).redundent_sw = redundent_sw;
+    total_dual(benders_index).delta = dual_delta;
+    total_dual(benders_index).switch = dual_switch;
+    
+    % master_problem optimization based on benders decomposition
+    [objval_lowerbound(benders_index), delta, redundent_sw, benders_cut ] = optimization_masterproblem( operation_mode, total_sub, total_dual, benders_cut_lowerbound );
+    if benders_cut > benders_cut_lowerbound
+        benders_cut_lowerbound = benders_cut;
+    end
+    
+    % performance comparison
+    error(benders_index) = objval_upperbound(benders_index) - objval_lowerbound(benders_index);
+    dual_gap(benders_index) = 100*error(benders_index)/objval_lowerbound(benders_index);
+    disp('upperbound, lowerbound, error, dual_gap');
+    disp([objval_upperbound(benders_index) objval_lowerbound(benders_index) error(benders_index) dual_gap(benders_index)]);
+    
+    % convergence determination
+    if error(benders_index) <= 1e-3
+        break;
+    end
 end
 
+% save('result.mat','result');
+% save('upperbound.mat','upperbound');
+% save('upperbound.mat','upperbound');
+result = [objval_upperbound; objval_lowerbound; error; dual_gap;];
 save('result.mat','result');
-save('upperbound.mat','upperbound');
-
-
-% b_benders = 0;
-% for index_sm = 1:20
-%     for operation_mode = 7:7
-%         [objval_upperbound(index_sm), cvx_optval, Pg, Pb, Ppr, Pd] = optimization_subproblem( operation_mode, delta, Redundent_switch, Pg, Pb );
-%         if isnan(Pg(1,1))
-%             break;
-%         end
-%         [objval_lowerbound(index_sm), delta, Redundent_switch, Pg, b_benders ] = optimization_masterproblem( operation_mode, delta, Redundent_switch, Pg, Pb, Ppr, Pd, cvx_optval, b_benders );
-%         if isnan(Pg(1,1))
-%             break;
-%         end
-%         ul_error = objval_upperbound(index_sm) - objval_lowerbound(index_sm);
-%         if  objval_upperbound(index_sm) - objval_lowerbound(index_sm) < OPTIONS.error
-% %             break;
-%         end
-%     end
-% end
 
 
 end
@@ -121,6 +153,7 @@ OPTIONS.alpha = 1/6;
 OPTIONS.C_ss = [90; 45];
 OPTIONS.R_G = 1;
 OPTIONS.error = 1e-3;
+OPTIONS.Penalty = max([2*OPTIONS.G(1,1)*OPTIONS.Pg_Max(1) + OPTIONS.G(1,2) 2*OPTIONS.G(2,1)*OPTIONS.Pg_Max(2) + OPTIONS.G(2,2)]);
 
 % load_information = [OPTIONS.P_L_TIME_off; OPTIONS.P_L_TIME_on; OPTIONS.Coupled_load];
 % save('load_information');
@@ -130,10 +163,10 @@ end
 %% heuristic algorithm
 function [delta] = starup_slot(startup_index)
 global OPTIONS
-delta = ones(2, OPTIONS.N_t);
+delta = zeros(2, OPTIONS.N_t);
 % one slot shutdown for two generators
 if startup_index <= 12
-    delta(startup_index) = 0;
+    delta(startup_index) = 1;
 % two slots shutdown for two generators
 elseif startup_index <= 42
     index = startup_index - 12;
@@ -160,7 +193,7 @@ end
 end
 
 %% the subproblem which is used to calculate the optimal power of generators and ESMs
-function [ cvx_optval, Pg, Pb, Ppr ] = total_cost_optimization( operation_mode, delta, Redundent_switch,  Pg_m, Pb )  
+function [ cvx_optval, Pg, Pb, Ppr ] = total_cost_optimization( operation_mode, delta, redundent_sw,  Pg_m, Pb )  
 global OPTIONS
 
 startup = (delta(1:2,2:end) - delta(1:2,1:end-1)>=1);
@@ -225,8 +258,8 @@ cvx_begin quiet
             end
         elseif operation_mode <= 7
             for t_index = 1:OPTIONS.N_t
-                Redundent_switch*OPTIONS.Coupled_load(:,t_index) +  (1-OPTIONS.alpha - 2/6) * OPTIONS.P_L_TIME_off(1,t_index) + Ppr(1,t_index) == (Pg(1,t_index)) + Pb(1,t_index) 
-                ~Redundent_switch*OPTIONS.Coupled_load(:,t_index) + OPTIONS.alpha * OPTIONS.P_L_TIME_off(1,t_index)  == (Pg(2,t_index)) + Pb(2,t_index)
+                redundent_sw(1,:)*OPTIONS.Coupled_load(:,t_index) +  (1-OPTIONS.alpha - 2/6) * OPTIONS.P_L_TIME_off(1,t_index) + Ppr(1,t_index) == (Pg(1,t_index)) + Pb(1,t_index) 
+                redundent_sw(2,:)*OPTIONS.Coupled_load(:,t_index) + OPTIONS.alpha * OPTIONS.P_L_TIME_off(1,t_index)  == (Pg(2,t_index)) + Pb(2,t_index)
             end
         end
         
@@ -259,7 +292,7 @@ disp(cvx_optval);
 end
 
 %% the subproblem which is used to calculate the optimal power of generators and ESMs
-function [objval_upperbound, cvx_optval, Pg, Pb, Ppr, ds1, ds2  ] = optimization_subproblem( operation_mode, delta, Redundent_switch,  Pg_m, Pb )  
+function [objval_upperbound, sub_optval, dual_delta, dual_switch, Pg, Pb, Ppr ] = optimization_subproblem( operation_mode, delta, redundent_sw )  
 global OPTIONS
 
 lowerbound(1,:) = delta(1,1:OPTIONS.N_t) * OPTIONS.Pg_Min(1);
@@ -273,24 +306,32 @@ cvx_begin quiet
     variable E(2,OPTIONS.N_t) nonnegative
     variable Pg(OPTIONS.N_g, OPTIONS.N_t) nonnegative
     variable delta_s(OPTIONS.N_g,OPTIONS.N_t)
-    dual variable ds1
-    dual variable ds2
+    dual variable dual_delta_g1
+    dual variable dual_delta_g2
+    dual variable dual_Sp
+    dual variable dual_Ss
+    variable Pc(OPTIONS.N_g, OPTIONS.N_t) nonnegative
+    variable Pd(OPTIONS.N_g, OPTIONS.N_t) nonnegative
     minimize( sum(OPTIONS.G(1,1) * power(Pg(1,1:OPTIONS.N_t).',2) ,1) ...
             + sum(OPTIONS.G(2,1) * power(Pg(2,1:OPTIONS.N_t).',2) ,1) ...
             + sum(OPTIONS.G(1,2) * power(Pg(1,1:OPTIONS.N_t).',1) ,1) ...
             + sum(OPTIONS.G(2,2) * power(Pg(2,1:OPTIONS.N_t).',1) ,1) ...
-            + OPTIONS.Xi * sum(OPTIONS.E(1:2,1).'* power(Pb(1:OPTIONS.N_e,1:OPTIONS.N_t),2) ,2) ...
-            + OPTIONS.Xi * sum(OPTIONS.E(1:2,2).'* ones(OPTIONS.N_g,OPTIONS.N_t) ,2)  )
+            + sum(OPTIONS.Penalty * Pc(1,1:OPTIONS.N_t).' ,1) ...
+            + sum(OPTIONS.Penalty * Pc(2,1:OPTIONS.N_t).' ,1) ...
+            + sum(OPTIONS.Penalty * Pd(1,1:OPTIONS.N_t).' ,1) ...
+            + sum(OPTIONS.Penalty * Pd(2,1:OPTIONS.N_t).' ,1) )
+%             + OPTIONS.Xi * sum(OPTIONS.E(1:2,1).'* power(Pb(1:OPTIONS.N_e,1:OPTIONS.N_t),2) ,2) ...
+%             + OPTIONS.Xi * sum(OPTIONS.E(1:2,2).'* ones(OPTIONS.N_g,OPTIONS.N_t) ,2)...
  
     subject to
         % the range constraints of all the variables
-        Pg(1,1:OPTIONS.N_t) <= delta_s(1,1:OPTIONS.N_t) * OPTIONS.Pg_Max(1) 
-        Pg(2,1:OPTIONS.N_t) <= delta_s(2,1:OPTIONS.N_t) * OPTIONS.Pg_Max(2)
-        Pg(1,1:OPTIONS.N_t) >= delta_s(1,1:OPTIONS.N_t) * OPTIONS.Pg_Min(1)
-        Pg(2,1:OPTIONS.N_t) >= delta_s(2,1:OPTIONS.N_t) * OPTIONS.Pg_Min(2)
+        Pg(1,1:OPTIONS.N_t) <= delta_s(1,1:OPTIONS.N_t) * OPTIONS.Pg_Max(1) + Pc(1,1:OPTIONS.N_t)
+        Pg(1,1:OPTIONS.N_t) >= delta_s(1,1:OPTIONS.N_t) * OPTIONS.Pg_Min(1) - Pd(1,1:OPTIONS.N_t)
+        Pg(2,1:OPTIONS.N_t) <= delta_s(2,1:OPTIONS.N_t) * OPTIONS.Pg_Max(2) + Pc(2,1:OPTIONS.N_t)
+        Pg(2,1:OPTIONS.N_t) >= delta_s(2,1:OPTIONS.N_t) * OPTIONS.Pg_Min(2) - Pd(2,1:OPTIONS.N_t)
         
-        ds1 : delta_s(1,1:OPTIONS.N_t) == delta(1,1:OPTIONS.N_t)
-        ds2 : delta_s(2,1:OPTIONS.N_t) == delta(2,1:OPTIONS.N_t)
+        dual_delta_g1 : delta_s(1,1:OPTIONS.N_t) == delta(1,1:OPTIONS.N_t)
+        dual_delta_g2 : delta_s(2,1:OPTIONS.N_t) == delta(2,1:OPTIONS.N_t)
         
         % ramping rate power of generators
         Pg(1,2:OPTIONS.N_t) -Pg(1,1:OPTIONS.N_t-1) <= OPTIONS.R_G
@@ -328,10 +369,13 @@ cvx_begin quiet
             end
         elseif operation_mode <= 7
             for t_index = 1:OPTIONS.N_t
-                Redundent_switch*OPTIONS.Coupled_load(:,t_index) +  (1-OPTIONS.alpha - 2/6) * OPTIONS.P_L_TIME_off(1,t_index) + Ppr(1,t_index) == (Pg(1,t_index)) + Pb(1,t_index) 
-                ~Redundent_switch*OPTIONS.Coupled_load(:,t_index) + OPTIONS.alpha * OPTIONS.P_L_TIME_off(1,t_index)  == (Pg(2,t_index)) + Pb(2,t_index)
+                redundent_sw(1,:)*OPTIONS.Coupled_load(:,t_index) +  (1-OPTIONS.alpha - 2/6) * OPTIONS.P_L_TIME_off(1,t_index) + Ppr(1,t_index) == (Pg(1,t_index)) + Pb(1,t_index) 
+                redundent_sw(2,:)*OPTIONS.Coupled_load(:,t_index) + OPTIONS.alpha * OPTIONS.P_L_TIME_off(1,t_index)  == (Pg(2,t_index)) + Pb(2,t_index)
             end
         end
+        
+        dual_Sp : redundent_sw(1,:) == redundent_sw(1,:)
+        dual_Ss : redundent_sw(2,:) == redundent_sw(2,:)
         
         % voyage planning            
         if operation_mode ==0
@@ -360,15 +404,21 @@ startup = (delta_s(1:2,2:OPTIONS.N_t) - delta_s(1:2,1:OPTIONS.N_t-1)>=1);
 startup_cost = sum(OPTIONS.C_ss(1:2,1).'* startup ,2);
 one_item_cost = sum(OPTIONS.G(1,3) * delta_s(1,1:OPTIONS.N_t) ,2) + sum(OPTIONS.G(2,3) * delta_s(2,1:OPTIONS.N_t) ,2);
 
+sub_optval = cvx_optval;
 objval_upperbound = cvx_optval + startup_cost + one_item_cost;
 
-disp('upperbound');
-disp(objval_upperbound);
+dual_switch(1,:) = dual_Sp;
+dual_switch(2,:) = dual_Ss;
+dual_delta(1,:) = dual_delta_g1;
+dual_delta(2,:) = dual_delta_g2;
+
+% disp('upperbound');
+% disp(objval_upperbound);
 
 end
 
 %% the master problem which is used to determine the redundent switches and ??
-function [objval_lowerbound, delta_g, Redundent_switch, Pg_m, benders_cut ] = optimization_masterproblem( operation_mode, delta, Redundent_switch, Pg, Pb, Ppr, sub_optval, benders_cut, Pd )
+function [cvx_optval, master_delta, master_redundent_switch, benders_cut ] = optimization_masterproblem( operation_mode, total_sub, total_dual, benders_cut_lowerbound )
 global OPTIONS
  
 if ~exist('benders_cut', 'var')
@@ -379,55 +429,68 @@ if ~exist('Pd', 'var')
     Pd = 0;
 end
 
-%% dual variable and upperbound
-lambda_B(1,:) = -2*OPTIONS.G(1,1)*Pg(1,:) - OPTIONS.G(1,2)*Pg(1,:);
-lambda_B(2,:) = -2*OPTIONS.G(2,1)*Pg(2,:) - OPTIONS.G(2,2)*Pg(2,:);
-% lambda_Pg(1,1:OPTIONS.N_t) = - 2*OPTIONS.G(1,1)*Pg(1,:) - lambda_B(1,:);
-% lambda_Pg(2,1:OPTIONS.N_t) = - 2*OPTIONS.G(1,1)*Pg(2,:) - lambda_B(2,:);
-lambda_delta(1,:) = -OPTIONS.G(1,1)*power(Pg(1,:),2) - OPTIONS.G(1,2)*Pg(1,:);
-lambda_delta(2,:) = -OPTIONS.G(2,1)*power(Pg(2,:),2) - OPTIONS.G(2,2)*Pg(2,:);
-for index_t = 1:OPTIONS.N_t
-    lambda_Px(1, index_t) = lambda_B(1, index_t).'*OPTIONS.Coupled_load(1, index_t);
-    lambda_Px(2, index_t) = lambda_B(1, index_t).'*OPTIONS.Coupled_load(2, index_t);
-    lambda_Sy(1, index_t) = lambda_B(2, index_t).'*OPTIONS.Coupled_load(1, index_t);
-    lambda_Sy(2, index_t) = lambda_B(2, index_t).'*OPTIONS.Coupled_load(2, index_t);
-end
+% %% dual variable and upperbound
+% lambda_B(1,:) = -2*OPTIONS.G(1,1)*Pg(1,:) - OPTIONS.G(1,2)*Pg(1,:);
+% lambda_B(2,:) = -2*OPTIONS.G(2,1)*Pg(2,:) - OPTIONS.G(2,2)*Pg(2,:);
+% % lambda_Pg(1,1:OPTIONS.N_t) = - 2*OPTIONS.G(1,1)*Pg(1,:) - lambda_B(1,:);
+% % lambda_Pg(2,1:OPTIONS.N_t) = - 2*OPTIONS.G(1,1)*Pg(2,:) - lambda_B(2,:);
+% lambda_delta(1,:) = -OPTIONS.G(1,1)*power(Pg(1,:),2) - OPTIONS.G(1,2)*Pg(1,:);
+% lambda_delta(2,:) = -OPTIONS.G(2,1)*power(Pg(2,:),2) - OPTIONS.G(2,2)*Pg(2,:);
+% for index_t = 1:OPTIONS.N_t
+%     lambda_Px(1, index_t) = lambda_B(1, index_t).'*OPTIONS.Coupled_load(1, index_t);
+%     lambda_Px(2, index_t) = lambda_B(1, index_t).'*OPTIONS.Coupled_load(2, index_t);
+%     lambda_Sy(1, index_t) = lambda_B(2, index_t).'*OPTIONS.Coupled_load(1, index_t);
+%     lambda_Sy(2, index_t) = lambda_B(2, index_t).'*OPTIONS.Coupled_load(2, index_t);
+% end
 
-cvx_begin
+% cvx_begin
 cvx_solver Mosek
-% cvx_begin quiet
-    variable delta_master(OPTIONS.N_g, OPTIONS.N_t) binary
+cvx_begin quiet
+    variable master_delta(OPTIONS.N_g, OPTIONS.N_t) binary
+    variable master_redundent_switch(2,2) binary
     variable startup(OPTIONS.N_g, OPTIONS.N_t-1) binary
     variable benders_cut 
 %     variable E(2,OPTIONS.N_t) nonnegative
 %     variable Pg(OPTIONS.N_g, OPTIONS.N_t) nonnegative
-    minimize( sum(OPTIONS.G(1,3) * delta_master(1,1:OPTIONS.N_t) ,2) ...
-            + sum(OPTIONS.G(2,3) * delta_master(2,1:OPTIONS.N_t) ,2) ...
+    minimize( sum(OPTIONS.G(1,3) * master_delta(1,1:OPTIONS.N_t) ,2) ...
+            + sum(OPTIONS.G(2,3) * master_delta(2,1:OPTIONS.N_t) ,2) ...
             + sum(OPTIONS.C_ss(1:2,1).'* startup ,2) + benders_cut )
  
     subject to
         % startup detect
-        startup(1,1:OPTIONS.N_t-1) >= (delta_master(1,2:OPTIONS.N_t) - delta_master(1,1:OPTIONS.N_t-1))
-        startup(2,1:OPTIONS.N_t-1) >= (delta_master(2,2:OPTIONS.N_t) - delta_master(2,1:OPTIONS.N_t-1))
+        startup(1,1:OPTIONS.N_t-1) >= (master_delta(1,2:OPTIONS.N_t) - master_delta(1,1:OPTIONS.N_t-1))
+        startup(2,1:OPTIONS.N_t-1) >= (master_delta(2,2:OPTIONS.N_t) - master_delta(2,1:OPTIONS.N_t-1))
 
 %         % the range constraints of all the variables
 %         Pg(1,1:OPTIONS.N_t) <= delta(1,1:OPTIONS.N_t) * OPTIONS.Pg_Max(1)
 %         Pg(2,1:OPTIONS.N_t) <= delta(2,1:OPTIONS.N_t) * OPTIONS.Pg_Max(2)
 %         Pg(1,1:OPTIONS.N_t) >= delta(1,1:OPTIONS.N_t) * OPTIONS.Pg_Min(1)
 %         Pg(2,1:OPTIONS.N_t) >= delta(2,1:OPTIONS.N_t) * OPTIONS.Pg_Min(2)
+        
+        % speedup constraints
+        master_delta(1,1:OPTIONS.N_t) + master_delta(2,1:OPTIONS.N_t) >= 1 * ones(1,OPTIONS.N_t)
 
-%         %  Redundent_switch
-%         Redundent_switch(1,1) + Redundent_switch(1,3) == 1
-%         Redundent_switch(1,2) + Redundent_switch(1,4) == 1
+        %  Redundent_switch
+        master_redundent_switch(1,1) + master_redundent_switch(2,1) == 1
+        master_redundent_switch(1,2) + master_redundent_switch(2,2) == 1
         
          % benders cuts
-        benders_cut >= sub_optval + lambda_delta(1,:)*delta_master(1,:).' - lambda_delta(1,:)*delta(1,:).' + lambda_delta(2,:)*delta_master(2,:).' - lambda_delta(2,:)*delta(2,:).'
-%                        + sum(Redundent_switch_m(1,1)*lambda_Px(1,:) + Redundent_switch_m(1,2)*lambda_Px(1,:) - Redundent_switch(1,1)*lambda_Px(1,:) - Redundent_switch(1,2)*lambda_Px(1,:)...
-%                        + Redundent_switch_m(1,3)*lambda_Sy(1,:) + Redundent_switch_m(1,4)*lambda_Sy(1,:) - ~Redundent_switch(1,1)*lambda_Sy(1,:) - ~Redundent_switch(1,2)*lambda_Sy(1,:));
-                   
+%         for index_benders = max([size(total_sub,2)-2 1] ):size(total_sub,2)
+        for index_benders = 1:size(total_sub,2)
+            benders_cut >=  total_sub(index_benders).sub_optval ...
+                            + total_dual(index_benders).delta(1,:)*master_delta(1,:).' - total_dual(index_benders).delta(1,:)*total_sub(index_benders).delta(1,:).'...
+                            + total_dual(index_benders).delta(2,:)*master_delta(2,:).' - total_dual(index_benders).delta(2,:)*total_sub(index_benders).delta(2,:).' 
+                            + total_dual(index_benders).switch(1,:)*master_redundent_switch(1,:).' - total_dual(index_benders).switch(1,:)*total_sub(index_benders).redundent_sw(1,:).'...
+                            + total_dual(index_benders).switch(2,:)*master_redundent_switch(2,:).' - total_dual(index_benders).switch(2,:)*total_sub(index_benders).redundent_sw(2,:).';
+        end
+        
+%         benders_cut >= benders_cut_lowerbound
+        
 cvx_end
 
-disp('optimal');
-disp(cvx_optval);
+redundent_sw = master_redundent_switch;
+
+% disp('optimal');
+% disp(cvx_optval);
 
 end
