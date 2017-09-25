@@ -1,10 +1,24 @@
-function [optimal_cost_comparison ] = cost_optimization_for_test_benders( voya_distance )
-global OPTIONS online_offline
+function [optimal_cost_comparison ] = cost_optimization_for_test_benders( time_slot, voya_distance, accelerate_flag_input )
+global OPTIONS online_offline accelerate_flag decomposition_flag
+ 
+if ~exist('time_slot', 'var')
+    OPTIONS.N_t = 12;
+else
+    OPTIONS.N_t = time_slot;
+end
+
  
 if ~exist('voya_distance', 'var')
-    OPTIONS.Distance = 70;
+    OPTIONS.Distance = 150;
 else
     OPTIONS.Distance = voya_distance;
+end
+
+ 
+if ~exist('accelerate_flag_input', 'var')
+    accelerate_flag = 3;
+else
+    accelerate_flag = accelerate_flag_input;
 end
 
 online_offline = 0;
@@ -116,15 +130,16 @@ for benders_index = 1: 500
 
 end
 
+% optimal_cost_comparison
 
 % save('result.mat','result');
 % save('upperbound.mat','upperbound');
 % save('upperbound.mat','upperbound');
-result = [objval_upperbound(2:end); objval_lowerbound(1:end-1); error(2:end); dual_gap(2:end);];
+optimal_cost_comparison = [objval_upperbound(2:end); objval_lowerbound(1:end-1); error(2:end); dual_gap(2:end);];
 % result = [best_upperbound(2:end); best_lowerbound(1:end-1); error(2:end); dual_gap(2:end);];
-save('result.mat','result');
+save('optimal_cost_comparison.mat','optimal_cost_comparison');
 
-plot_result(result);
+plot_result(optimal_cost_comparison);
 
 
 end
@@ -146,7 +161,7 @@ OPTIONS.N_e = 2;
 % number of generators
 OPTIONS.N_g = 2; 
 % number of time slots
-OPTIONS.N_t = 6;
+% OPTIONS.N_t = 12;
 % minmum time between startup and shuntdown
 OPTIONS.Tmin = 1;
 % time of faults happen
@@ -166,13 +181,13 @@ OPTIONS.Pb_Min(1) = -1;
 OPTIONS.E_Max = [3 3];
 
 OPTIONS.P_L = [2.7 0.9]; % P_Generater
-OPTIONS.P_L_Scale = [0.5 0.6 0.8 0.82 0.7 0.6 0.4 0.35 0.3 0.33 0.4 0.5 0.4]; 
+OPTIONS.P_L_Scale = [0.5 0.6 0.8 0.82 0.7 0.6 0.4 0.35 0.3 0.33 0.4 0.5 0.4 0.3 0.6 0.8 0.82 0.9 0.9 0.7 0.62 0.5 0.33 0.4 0.5 0.4]; 
 
 % the load demand without random feature
-P_L_Scale_on = interp1(1:13,OPTIONS.P_L_Scale,1:0.5:13,'spline') + 0.1*rand(1, 25); 
+P_L_Scale_on = interp1(1:13,OPTIONS.P_L_Scale(1:13),1:0.5:13,'spline') + 0.1*rand(1, 25); 
 % the load demand with random feature
 % P_L_Scale_off = interp1(1:13,OPTIONS.P_L_Scale,1:0.5:13,'spline');
-P_L_Scale_off = interp1(1:13,OPTIONS.P_L_Scale,1:0.5:13,'spline');
+P_L_Scale_off = interp1(1:13,OPTIONS.P_L_Scale(1:13),1:0.5:13,'spline');
 
 OPTIONS.P_L_TIME_off = sum(OPTIONS.P_L.'* P_L_Scale_off(:,1:OPTIONS.N_t), 1);
 OPTIONS.P_L_TIME_on= sum(OPTIONS.P_L.'* P_L_Scale_on(:,1:OPTIONS.N_t), 1);
@@ -579,7 +594,7 @@ end
 
 %% the master problem which is used to determine the redundent switches and ??
 function [cvx_optval, master_delta, master_redundent_switch, benders_cut ] = optimization_masterproblem( operation_mode, total_sub, total_dual, benders_cut_lowerbound, Ppr )
-global OPTIONS 
+global OPTIONS accelerate_flag
  
 if ~exist('benders_cut', 'var')
     benders_cut = 0;
@@ -642,14 +657,25 @@ cvx_begin quiet
                             + total_dual(index_benders).switch(1,:)*master_redundent_switch(1,:).' - total_dual(index_benders).switch(1,:)*total_sub(index_benders).redundent_sw(1,:).'...
                             + total_dual(index_benders).switch(2,:)*master_redundent_switch(2,:).' - total_dual(index_benders).switch(2,:)*total_sub(index_benders).redundent_sw(2,:).';
         end
-        
-        % speedup constraints: power range
-        master_delta(1,1:OPTIONS.N_t)*OPTIONS.Pg_Max(1) + master_delta(2,1:OPTIONS.N_t)*OPTIONS.Pg_Max(2) +  OPTIONS.Pb_Max * ones(1,OPTIONS.N_t) >= OPTIONS.P_L_TIME_off + Ppr
-        master_delta(1,1:OPTIONS.N_t)*OPTIONS.Pg_Min(1) + master_delta(2,1:OPTIONS.N_t)*OPTIONS.Pg_Min(2) +  OPTIONS.Pb_Min * ones(1,OPTIONS.N_t) <= OPTIONS.P_L_TIME_off + Ppr
-        
-        % speedup constraint: lower bound
-        benders_cut >= benders_cut_lowerbound
-        
+ 
+        if accelerate_flag == 1 % only power range
+            % speedup constraints: power range
+            master_delta(1,1:OPTIONS.N_t)*OPTIONS.Pg_Max(1) + master_delta(2,1:OPTIONS.N_t)*OPTIONS.Pg_Max(2) +  OPTIONS.Pb_Max * ones(1,OPTIONS.N_t) >= OPTIONS.P_L_TIME_off + Ppr
+            master_delta(1,1:OPTIONS.N_t)*OPTIONS.Pg_Min(1) + master_delta(2,1:OPTIONS.N_t)*OPTIONS.Pg_Min(2) +  OPTIONS.Pb_Min * ones(1,OPTIONS.N_t) <= OPTIONS.P_L_TIME_off + Ppr
+        elseif accelerate_flag == 2 % only lower bound
+            % speedup constraint: lower bound
+            benders_cut >= benders_cut_lowerbound
+        elseif accelerate_flag == 3 % have two constraints
+            
+            % speedup constraints: power range
+            master_delta(1,1:OPTIONS.N_t)*OPTIONS.Pg_Max(1) + master_delta(2,1:OPTIONS.N_t)*OPTIONS.Pg_Max(2) +  OPTIONS.Pb_Max * ones(1,OPTIONS.N_t) >= OPTIONS.P_L_TIME_off + Ppr
+            master_delta(1,1:OPTIONS.N_t)*OPTIONS.Pg_Min(1) + master_delta(2,1:OPTIONS.N_t)*OPTIONS.Pg_Min(2) +  OPTIONS.Pb_Min * ones(1,OPTIONS.N_t) <= OPTIONS.P_L_TIME_off + Ppr
+
+            % speedup constraint: lower bound
+            benders_cut >= benders_cut_lowerbound
+        else % non-constriant
+                
+        end        
 cvx_end
 
 redundent_sw = master_redundent_switch;
