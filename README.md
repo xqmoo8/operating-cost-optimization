@@ -1,1 +1,1 @@
-This work is used for optimizing the operating cost of MVDC shipboard.
+This work is used for optimizing the operating cost of MVDC shipboard power system. Especially, it can solve the problem in normal and failure mode.
