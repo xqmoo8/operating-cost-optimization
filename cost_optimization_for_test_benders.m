@@ -1,4 +1,5 @@
-function [optimal_cost, time_val_problem ] = cost_optimization_for_test_benders( time_slot, voya_distance, accelerate_flag_input, near_opt_optimal_input, operation_mode_input, varphi )
+function [optimal_cost, time_val_problem, reduced_distance, load_shedding ] ...
+         = cost_optimization_for_test_benders( time_slot, voya_distance, accelerate_flag_input, near_opt_optimal_input, operation_mode_input, varphi )
 global OPTIONS near_opt_optimal accelerate_flag 
 % decomposition_flag
 %% the adjusted parameters 
@@ -27,6 +28,7 @@ else
     near_opt_optimal = near_opt_optimal_input;
 end
 
+digits(5)
 %  operation_mode:
 % 0 (normal wo PPA ESMC) 
 % 1 (normal w PPA wo ESMC) 
@@ -59,7 +61,8 @@ Pg = zeros(2,OPTIONS.N_t);
 Pb = zeros(2,OPTIONS.N_t);
 delta = zeros(2, OPTIONS.N_t);
 % delta = ones(2, OPTIONS.N_t);
-redundent_sw = [ones(1, OPTIONS.N_t); zeros(1, OPTIONS.N_t); zeros(1, OPTIONS.N_t); ones(1, OPTIONS.N_t)];
+OPTIONS.initial_redundent_sw = [ones(1, OPTIONS.N_t); zeros(1, OPTIONS.N_t); zeros(1, OPTIONS.N_t); ones(1, OPTIONS.N_t)];
+redundent_sw = OPTIONS.initial_redundent_sw ;
 objval_upperbound = 0;
 objval_lowerbound = 0;
 best_upperbound = inf;
@@ -68,7 +71,8 @@ error = 0;
 dual_gap = 0;
 
 delta_bound = [ones(1, OPTIONS.N_t); ones(1, OPTIONS.N_t); ];
-benders_cut_lowerbound = 1.5*optimization_subproblem( operation_mode, delta_bound, redundent_sw )/3;
+[objval_upperbound_test, benders_cut_lowerbound] = optimization_subproblem( operation_mode, delta_bound, redundent_sw );
+benders_cut_lowerbound = 0.8 * benders_cut_lowerbound;
 
 %% start the iteration of the algorithm
 for benders_index = 1: 800
@@ -95,7 +99,8 @@ for benders_index = 1: 800
     
     if benders_index >= 2
         % performance comparison
-        error(benders_index) = objval_upperbound(benders_index) - objval_lowerbound(benders_index-1);
+        error(benders_index) = ( objval_upperbound(benders_index) - objval_lowerbound(benders_index-1) );
+%         error(benders_index) = ( objval_upperbound(benders_index) - objval_lowerbound(benders_index) );
         dual_gap(benders_index) = 100*error(benders_index)/objval_lowerbound(benders_index);
         disp('upperbound, lowerbound, error, dual_gap');
         disp([objval_upperbound(benders_index) objval_lowerbound(benders_index) error(benders_index) dual_gap(benders_index)]);
@@ -117,16 +122,64 @@ for benders_index = 1: 800
             break;
         end
     end
+    
+%     if abs(objval_upperbound(benders_index) - 7.3724e+04) < 10
+%         disp(1);
+%     end
 
 end
 
+
 optimal_cost = [objval_lowerbound(1:end-1); objval_upperbound(2:end); error(2:end); dual_gap(2:end); time_val_sub(2:end); time_val_master(2:end)];
-% result = [best_upperbound(2:end); best_lowerbound(1:end-1); error(2:end); dual_gap(2:end);];
-save('optimal_cost.mat','optimal_cost');
+
+% optimal_result = [Pg, Pb, Ppr, OPTIONS.P_L_TIME_off, optimal_cost, sum(load_shedding,1), Pc, Pd, reduced_distance*ones(1,OPTIONS.N_t)];
+% save('optimal_result.mat','optimal_result');
+save_optimal_cost_information(objval_lowerbound(end), delta, redundent_sw, Pg, Pb, Ppr, Pc, Pd, reduced_distance, load_shedding, operation_mode, near_opt_optimal );
+
 
 plot_result(optimal_cost);
 
 end
+
+function save_optimal_cost_information(optimal_cost, delta, redundent_sw, Pg, Pb, Ppr, Pc, Pd, reduced_distance, load_shedding, operation_mode, near_opt_optimal )
+global OPTIONS 
+operating_cost = OPTIONS.G(1:2,1).'* power(Pg(1:2,1:OPTIONS.N_t),2)  + OPTIONS.G(1:2,2).'*Pg(1:2,1:OPTIONS.N_t) + OPTIONS.G(1:2,3).'*delta ...
+                + OPTIONS.Xi_E* sum( OPTIONS.E(1:2,1).'* power(Pb(1:2,1:OPTIONS.N_t),2) + OPTIONS.Xi_E* (OPTIONS.E(1:2,2).'* ones(2,OPTIONS.N_t)), 1);
+Penalty_cost_LS =  OPTIONS.Penalty_L * sum(load_shedding(1:2,1:OPTIONS.N_t),1) ;
+% Penalty_cost_LD =  sum(OPTIONS.Penalty_L * sum(load_shedding(1:2,1:OPTIONS.N_t),2) ,1) ...
+%                     + 1.02*OPTIONS.Penalty_D * reduced_distance;
+% Penalty_cost_cd =  sum(50 * OPTIONS.Penalty_D * Pc(1,1:OPTIONS.N_t).' ,1) ...
+%                     + sum(10 * OPTIONS.Penalty_D * Pc(2,1:OPTIONS.N_t).' ,1) ...
+%                     + sum(10 * OPTIONS.Penalty_D * Pd(1,1:OPTIONS.N_t).' ,1) ...
+%                     + sum(10 * OPTIONS.Penalty_D * Pd(2,1:OPTIONS.N_t).' ,1);
+startup_cost =  delta(1:2,1:OPTIONS.N_t) - [0 delta(1,1:OPTIONS.N_t-1); 0 delta(2,1:OPTIONS.N_t-1)] ;
+operating_cost = operating_cost + sum(OPTIONS.C_ss.'*(startup_cost>0), 1) + Penalty_cost_LS;
+
+total_switching = sum( abs(redundent_sw(1,1) - OPTIONS.initial_redundent_sw(1,1)) ) + sum(abs(redundent_sw(3,1) - OPTIONS.initial_redundent_sw(3,1))) ...
+        + sum( abs(redundent_sw(1,2:OPTIONS.N_t) - redundent_sw(1,1:OPTIONS.N_t-1)) ) + sum(abs(redundent_sw(3,2:OPTIONS.N_t) - redundent_sw(3,1:OPTIONS.N_t-1)));
+
+data = zeros(9,OPTIONS.N_t);
+data(1:2,:) =  Pg;
+data(3:4,:) =  Pb;
+data(5,:) =    Ppr;
+data(6,:) = OPTIONS.P_L_TIME_off(1,1:OPTIONS.N_t);
+data(7,:) = operating_cost;
+data(8,:) = sum(load_shedding(1:2,1:OPTIONS.N_t),1);
+data(9,1) = reduced_distance;
+data(9,2) = total_switching;
+data(9,3) = optimal_cost;
+
+algorithm = ['optimal_alg', 'LNBD' ];
+if near_opt_optimal ==0
+    filename = ['optimal_alg_data_mode_',num2str(operation_mode),'_D_',num2str(OPTIONS.Distance),'.mat'];
+elseif near_opt_optimal ==1
+    filename = ['LNBD_data_mode_',num2str(operation_mode),'_D_',num2str(OPTIONS.Distance),'.mat'];
+end
+
+save(filename,'data');
+
+end
+
 
 %% plot the simulation result
 function plot_result(result)
@@ -176,11 +229,24 @@ elseif operation_mode <= 7
     OPTIONS.island1_load = P_vs_island1 + P_no_island1;
     OPTIONS.island1_load_average = sum(OPTIONS.island1_load(1:OPTIONS.N_t))/OPTIONS.N_t;
     OPTIONS.island1_non_load = P_no_island1(1:OPTIONS.N_t);
+    % not the real max, it's the maximum of the supply power of vital and
+    % semi loads, which can be considered as the minimum value of upperbound 
+    OPTIONS.island1_max = P_vs_island1(1:OPTIONS.N_t) ;
+    OPTIONS.island1_min = OPTIONS.island1_load(1:OPTIONS.N_t) - OPTIONS.island1_non_load;
+    
     OPTIONS.island2_load = P_vs_island2 + P_no_island2;
     OPTIONS.island2_load_average = sum(OPTIONS.island2_load(1:OPTIONS.N_t))/OPTIONS.N_t;
     OPTIONS.island2_non_load = P_no_island2(1:OPTIONS.N_t);
-    OPTIONS.island_total = OPTIONS.island1_load(1:OPTIONS.N_t) + OPTIONS.island2_load(1:OPTIONS.N_t) + OPTIONS.Coupled_load(1:OPTIONS.N_t);
-    OPTIONS.island_mini = OPTIONS.island_total - OPTIONS.island1_non_load(1:OPTIONS.N_t) -OPTIONS.island2_non_load(1:OPTIONS.N_t) ;
+    % not the real max, it's the maximum of the supply power of vital and semi loads
+    OPTIONS.island2_max = P_vs_island2(1:OPTIONS.N_t) ;
+    OPTIONS.island2_min = OPTIONS.island2_load(1:OPTIONS.N_t) - OPTIONS.island2_non_load;
+    
+    P_vs = P_vs_base * OPTIONS.P_vs_t_Scale;
+    P_no = P_no_base * OPTIONS.P_no_t_Scale;
+    P_total_vs = sum(P_vs);
+    
+    P_total_time = P_total_vs + P_no;
+    OPTIONS.P_L_TIME_off = P_total_time(1:OPTIONS.N_t);
 end
 
 % % the load demand without random feature
@@ -214,7 +280,7 @@ OPTIONS.P_pr_avg = (OPTIONS.velocity_avg).^3*2.2e-3;
 OPTIONS.Pg_Max(1) = 8;
 OPTIONS.Pg_Min(1) = 1;
 OPTIONS.Pg_Max(2) = 4;
-OPTIONS.Pg_Min(2) = 0.5;
+OPTIONS.Pg_Min(2) = 0.0;
 
 OPTIONS.Xi_E = 1;
 OPTIONS.Ppr_Max = (OPTIONS.velocity(1)).^3*2.2e-3;
@@ -228,7 +294,8 @@ OPTIONS.G(1,1:3) = [10 30 220];
 OPTIONS.G(2,1:3) = [14.5 12 170];
 OPTIONS.E(1:2,1:2) = [1 0.5; 1 0.5];
 OPTIONS.C_ss = [90; 45];
-OPTIONS.R_G = 2;
+OPTIONS.R_G = OPTIONS.Pg_Max/2;
+% OPTIONS.R_G = [2 2];
 OPTIONS.error = 1e-3;
 OPTIONS.Penalty = max([2*OPTIONS.G(1,1)*OPTIONS.Pg_Max(1) + OPTIONS.G(1,2), 2*OPTIONS.G(2,1)*OPTIONS.Pg_Max(2) + OPTIONS.G(2,2)]);
 A_max = max(OPTIONS.G(1:2,1));
@@ -297,10 +364,10 @@ cvx_begin quiet
         Pg(2,1:OPTIONS.N_t) >= delta(2,1:OPTIONS.N_t) * OPTIONS.Pg_Min(2)
 
         % ramping rate power of generators
-        Pg(1,2:OPTIONS.N_t) -Pg(1,1:OPTIONS.N_t-1) <= OPTIONS.R_G
-        Pg(1,2:OPTIONS.N_t) -Pg(1,1:OPTIONS.N_t-1) >= -OPTIONS.R_G
-        Pg(2,2:OPTIONS.N_t) -Pg(2,1:OPTIONS.N_t-1) <= OPTIONS.R_G
-        Pg(2,2:OPTIONS.N_t) -Pg(2,1:OPTIONS.N_t-1) >= -OPTIONS.R_G
+        Pg(1,2:OPTIONS.N_t) -Pg(1,1:OPTIONS.N_t-1) <= OPTIONS.R_G(1)
+        Pg(1,2:OPTIONS.N_t) -Pg(1,1:OPTIONS.N_t-1) >= -OPTIONS.R_G(1)
+        Pg(2,2:OPTIONS.N_t) -Pg(2,1:OPTIONS.N_t-1) <= OPTIONS.R_G(2)
+        Pg(2,2:OPTIONS.N_t) -Pg(2,1:OPTIONS.N_t-1) >= -OPTIONS.R_G(2)
 
         % propulsion power limitation
         Ppr(1,1:OPTIONS.N_t) <= OPTIONS.Ppr_Max * ones(1,OPTIONS.N_t)
@@ -372,6 +439,7 @@ global OPTIONS near_opt_optimal
 lowerbound(1,:) = delta(1,1:OPTIONS.N_t) * OPTIONS.Pg_Min(1);
 lowerbound(2,:) = delta(2,1:OPTIONS.N_t) * OPTIONS.Pg_Min(2);
 
+
 %% optimal algorithm
 if near_opt_optimal ==0
     for index = 1:1
@@ -397,13 +465,13 @@ if near_opt_optimal ==0
                     + sum(OPTIONS.G(1,2) * power(Pg(1,1:OPTIONS.N_t).',1) ,1) ...
                     + sum(OPTIONS.G(2,2) * power(Pg(2,1:OPTIONS.N_t).',1) ,1) ...
                     + OPTIONS.Xi_E * sum(OPTIONS.E(1:2,1).'* power(Pb(1:OPTIONS.N_e,1:OPTIONS.N_t),2) ,2) ...
-                    + OPTIONS.Xi_E * sum([1 1]* ones(OPTIONS.N_e,OPTIONS.N_t) ,2)...
+                    + OPTIONS.Xi_E * sum(OPTIONS.E(1:2,2).'* ones(OPTIONS.N_e,OPTIONS.N_t) ,2)...
                     + sum(OPTIONS.Penalty_L * sum(load_shedding(1:2,1:OPTIONS.N_t),2) ,1) ...
                     + 1.02*OPTIONS.Penalty_D * reduced_distance ...
-                    + sum(50 * OPTIONS.Penalty_D * Pc(1,1:OPTIONS.N_t).' ,1) ...
-                    + sum(50 * OPTIONS.Penalty_D * Pc(2,1:OPTIONS.N_t).' ,1) ...
-                    + sum(50 * OPTIONS.Penalty_D * Pd(1,1:OPTIONS.N_t).' ,1) ...
-                    + sum(50 * OPTIONS.Penalty_D * Pd(2,1:OPTIONS.N_t).' ,1) )
+                    + sum(10 * OPTIONS.Penalty_D * Pc(1,1:OPTIONS.N_t).' ,1) ...
+                    + sum(10 * OPTIONS.Penalty_D * Pc(2,1:OPTIONS.N_t).' ,1) ...
+                    + sum(10 * OPTIONS.Penalty_D * Pd(1,1:OPTIONS.N_t).' ,1) ...
+                    + sum(10 * OPTIONS.Penalty_D * Pd(2,1:OPTIONS.N_t).' ,1) )
 
             subject to
                 % the range constraints of all the variables
@@ -411,19 +479,23 @@ if near_opt_optimal ==0
                 Pg(1,1:OPTIONS.N_t) >= delta_s(1,1:OPTIONS.N_t) * OPTIONS.Pg_Min(1) - Pd(1,1:OPTIONS.N_t)
                 Pg(2,1:OPTIONS.N_t) <= delta_s(2,1:OPTIONS.N_t) * OPTIONS.Pg_Max(2) + Pc(2,1:OPTIONS.N_t)
                 Pg(2,1:OPTIONS.N_t) >= delta_s(2,1:OPTIONS.N_t) * OPTIONS.Pg_Min(2) - Pd(2,1:OPTIONS.N_t)
+%                 Pg(1,1:OPTIONS.N_t) <= delta_s(1,1:OPTIONS.N_t) * OPTIONS.Pg_Max(1) 
+%                 Pg(1,1:OPTIONS.N_t) >= delta_s(1,1:OPTIONS.N_t) * OPTIONS.Pg_Min(1) 
+%                 Pg(2,1:OPTIONS.N_t) <= delta_s(2,1:OPTIONS.N_t) * OPTIONS.Pg_Max(2) 
+%                 Pg(2,1:OPTIONS.N_t) >= delta_s(2,1:OPTIONS.N_t) * OPTIONS.Pg_Min(2)
 
                 dual_delta_g1 : delta_s(1,1:OPTIONS.N_t) == delta(1,1:OPTIONS.N_t)
                 dual_delta_g2 : delta_s(2,1:OPTIONS.N_t) == delta(2,1:OPTIONS.N_t)
 
                 % ramping rate power of generators
-                Pg(1,1) <= OPTIONS.R_G + Pc(1,1)
-                Pg(2,1) <= OPTIONS.R_G + Pc(2,1)
-                Pg(1,2:OPTIONS.N_t) - Pg(1,1:OPTIONS.N_t-1) <= OPTIONS.R_G
-                Pg(1,2:OPTIONS.N_t) - Pg(1,1:OPTIONS.N_t-1) >= -OPTIONS.R_G
-                Pg(2,2:OPTIONS.N_t) - Pg(2,1:OPTIONS.N_t-1) <= OPTIONS.R_G
-                Pg(2,2:OPTIONS.N_t) - Pg(2,1:OPTIONS.N_t-1) >= -OPTIONS.R_G
-                Pg(1,OPTIONS.N_t) <= OPTIONS.R_G + Pc(1,OPTIONS.N_t)
-                Pg(2,OPTIONS.N_t) <= OPTIONS.R_G + Pc(2,OPTIONS.N_t)
+                Pg(1,1) <= OPTIONS.R_G(1) + Pc(1,1)
+                Pg(2,1) <= OPTIONS.R_G(2) + Pc(2,1)
+                Pg(1,2:OPTIONS.N_t) - Pg(1,1:OPTIONS.N_t-1) <= OPTIONS.R_G(1)
+                Pg(1,2:OPTIONS.N_t) - Pg(1,1:OPTIONS.N_t-1) >= -OPTIONS.R_G(1)
+                Pg(2,2:OPTIONS.N_t) - Pg(2,1:OPTIONS.N_t-1) <= OPTIONS.R_G(2)
+                Pg(2,2:OPTIONS.N_t) - Pg(2,1:OPTIONS.N_t-1) >= -OPTIONS.R_G(2)
+                Pg(1,OPTIONS.N_t) <= OPTIONS.R_G(1) + Pc(1,OPTIONS.N_t)
+                Pg(2,OPTIONS.N_t) <= OPTIONS.R_G(2) + Pc(2,OPTIONS.N_t)
 
                 % propulsion power limitation
                 Ppr(1,1:OPTIONS.N_t) <= OPTIONS.Ppr_Max * ones(1,OPTIONS.N_t)
@@ -512,9 +584,16 @@ elseif near_opt_optimal == 1
     % update the rest parameters: rest distance, rest average ppr, and the
     % power deviation of load at next time slot. 
     for index_time = 1:OPTIONS.N_t
+        switch index_time
+            case OPTIONS.N_t
+                varphi_sub = 1;
+            otherwise
+                varphi_sub = OPTIONS.varphi;
+        end
+        
         if operation_mode <= 3
             Delta_PL =  OPTIONS.P_L_TIME_off(index_time) - OPTIONS.P_L_TIME_off_avg ;
-            Distance_slot_obj = ((Rest_ppr_avg - (1 - OPTIONS.varphi)*Delta_PL)/2.2e-3)^(1/3);
+            Distance_slot_obj = ((Rest_ppr_avg - (1 - varphi_sub)*Delta_PL)/2.2e-3)^(1/3);
             
             % ESM output power and the capacity constraints
             if index_time == 1
@@ -524,10 +603,12 @@ elseif near_opt_optimal == 1
                 rest_pmax_ESM = E(1,index_time-1) + E(2,index_time-1) - OPTIONS.E_Min(1) - OPTIONS.E_Min(2) ;
                 rest_pmin_ESM = E(1,index_time-1) + E(2,index_time-1) - OPTIONS.E_Max(1) - OPTIONS.E_Max(2) ;
             end
+            upper_bound_ESM_P = roundn( min( varphi_sub * Delta_PL, rest_pmax_ESM ), -4);
+            upper_bound_ESM_N = roundn( max( varphi_sub * Delta_PL, rest_pmin_ESM ), -4);
         elseif operation_mode <= 7
             Delta_PL_island1 = OPTIONS.island1_load(index_time) - OPTIONS.island1_load_average;
             Delta_PL_island2 = OPTIONS.island2_load(index_time) - OPTIONS.island2_load_average;
-            Distance_slot_obj = ((Rest_ppr_avg - (1 - OPTIONS.varphi)*Delta_PL_island1)/2.2e-3)^(1/3);
+            Distance_slot_obj = ((Rest_ppr_avg - (1 - varphi_sub)*Delta_PL_island1)/2.2e-3)^(1/3);
             
             % ESM output power and the capacity constraints
             if index_time == 1
@@ -540,7 +621,29 @@ elseif near_opt_optimal == 1
                 rest_pmax_ESM2 = E(2,index_time-1) - OPTIONS.E_Min(2) ;
                 rest_pmin_ESM1 = E(1,index_time-1) - OPTIONS.E_Max(1) ;
                 rest_pmin_ESM2 = E(2,index_time-1) - OPTIONS.E_Max(2) ;
-            end 
+            end
+            if sum(delta(1,index_time))>=1
+                upper_bound_ESM1P = roundn( min( varphi_sub * Delta_PL_island1, rest_pmax_ESM1 ), -4);
+                upper_bound_ESM1N = roundn( max( varphi_sub * Delta_PL_island1, rest_pmin_ESM1 ), -4);
+%                 upper_bound_ESM2P = roundn( min( varphi_sub * Delta_PL_island2, rest_pmax_ESM2 ), -4);
+%                 upper_bound_ESM2N = roundn( max( varphi_sub * Delta_PL_island2, rest_pmin_ESM2 ), -4);
+            else
+                upper_bound_ESM1P = roundn( rest_pmax_ESM1, -4);
+                upper_bound_ESM1N = roundn( rest_pmin_ESM1, -4);
+%                 upper_bound_ESM2P = roundn( min( varphi_sub * Delta_PL_island2, rest_pmax_ESM2 ), -4);
+%                 upper_bound_ESM2N = roundn( max( varphi_sub * Delta_PL_island2, rest_pmin_ESM2 ), -4);
+            end
+            if sum(delta(2,index_time))>=1
+%                 upper_bound_ESM1P = roundn( min( varphi_sub * Delta_PL_island1, rest_pmax_ESM1 ), -4);
+%                 upper_bound_ESM1N = roundn( max( varphi_sub * Delta_PL_island1, rest_pmin_ESM1 ), -4);
+                upper_bound_ESM2P = roundn( min( varphi_sub * Delta_PL_island2, rest_pmax_ESM2 ), -4);
+                upper_bound_ESM2N = roundn( max( varphi_sub * Delta_PL_island2, rest_pmin_ESM2 ), -4);
+            else
+%                 upper_bound_ESM1P = roundn( min( varphi_sub * Delta_PL_island1, rest_pmax_ESM1 ), -4);
+%                 upper_bound_ESM1N = roundn( max( varphi_sub * Delta_PL_island1, rest_pmin_ESM1 ), -4);
+                upper_bound_ESM2P = roundn( rest_pmax_ESM2, -4);
+                upper_bound_ESM2N = roundn( rest_pmin_ESM2, -4);
+            end
         end
         
         
@@ -569,10 +672,10 @@ elseif near_opt_optimal == 1
                     + OPTIONS.Xi_E * sum([1 1] * ones(OPTIONS.N_e,1) ,2)...
                     + sum(OPTIONS.Penalty_L * sum(load_shedding_on(1:2,1),2) ,1) ...
                     + 1.02 * OPTIONS.Penalty_D * reduced_distance_on ...
-                    + sum(50 * OPTIONS.Penalty_D * Pc(1).' ,1) ...
-                    + sum(50 * OPTIONS.Penalty_D * Pc(2).' ,1) ...
-                    + sum(50 * OPTIONS.Penalty_D * Pd(1).' ,1) ...
-                    + sum(50 * OPTIONS.Penalty_D * Pd(2).' ,1))
+                    + sum(10 * OPTIONS.Penalty_D * Pc(1).' ,1) ...
+                    + sum(10 * OPTIONS.Penalty_D * Pc(2).' ,1) ...
+                    + sum(10 * OPTIONS.Penalty_D * Pd(1).' ,1) ...
+                    + sum(10 * OPTIONS.Penalty_D * Pd(2).' ,1))
 
             subject to
                 % the range constraints of all the variables
@@ -581,19 +684,32 @@ elseif near_opt_optimal == 1
                 Pg_on(2,1) <= delta_s(2,1) * OPTIONS.Pg_Max(2) + Pc(2)
                 Pg_on(2,1) >= delta_s(2,1) * OPTIONS.Pg_Min(2) - Pd(2)
 
-                temp_dual_delta_g1 : delta_s(1,1) == delta(1,1)
-                temp_dual_delta_g2 : delta_s(2,1) == delta(2,1)
+                temp_dual_delta_g1 : delta_s(1,1) == delta(1,index_time)
+                temp_dual_delta_g2 : delta_s(2,1) == delta(2,index_time)
 
                 % ramping rate power of generators
-                if index_time == 1
-                    Pg_on(1,1) <= OPTIONS.R_G + Pc(1)
-                    Pg_on(2,1) <= OPTIONS.R_G + Pc(2)
-                else
-                    Pg_on(1,1) - Pg(1,index_time-1) <= OPTIONS.R_G + Pc(1)
-                    Pg_on(1,1) - Pg(1,index_time-1) >= -OPTIONS.R_G - Pd(1)
-                    Pg_on(2,1) - Pg(2,index_time-1) <= OPTIONS.R_G + Pc(2)
-                    Pg_on(2,1) - Pg(2,index_time-1) >= -OPTIONS.R_G - Pd(2)
+                switch index_time
+                    case 1
+                        Pg_on(1,1) <= OPTIONS.R_G(1) 
+                        Pg_on(2,1) <= OPTIONS.R_G(2) 
+                    case OPTIONS.N_t
+                        Pg_on(1,1) <= OPTIONS.R_G(1) 
+                        Pg_on(2,1) <= OPTIONS.R_G(2)
+                    otherwise
+                        Pg_on(1,1) - Pg(1,index_time-1) <= OPTIONS.R_G(1) 
+                        Pg_on(1,1) - Pg(1,index_time-1) >= -OPTIONS.R_G(1) 
+                        Pg_on(2,1) - Pg(2,index_time-1) <= OPTIONS.R_G(2) 
+                        Pg_on(2,1) - Pg(2,index_time-1) >= -OPTIONS.R_G(2) 
                 end
+%                 if index_time == 1
+%                     Pg_on(1,1) <= OPTIONS.R_G(1) 
+%                     Pg_on(2,1) <= OPTIONS.R_G(2) 
+%                 else
+%                     Pg_on(1,1) - Pg(1,index_time-1) <= OPTIONS.R_G(1) 
+%                     Pg_on(1,1) - Pg(1,index_time-1) >= -OPTIONS.R_G(1) 
+%                     Pg_on(2,1) - Pg(2,index_time-1) <= OPTIONS.R_G(2) 
+%                     Pg_on(2,1) - Pg(2,index_time-1) >= -OPTIONS.R_G(2) 
+%                 end
 
                 % propulsion power limitation
                 Ppr_on(1,1) <= OPTIONS.Ppr_Max
@@ -604,11 +720,11 @@ elseif near_opt_optimal == 1
                         % the scaler factor is related with load power in each
                         % island part and the adjusting factor.
                         Pb_on(1,1) + Pb_on(2,1) <= 2 * OPTIONS.Pb_Max
-                        Pb_on(1,1) + Pb_on(2,1) <= max( OPTIONS.varphi * Delta_PL, rest_pmax_ESM )
+                        Pb_on(1,1) + Pb_on(2,1) <= upper_bound_ESM_P
                         Pb_on(1,1) + Pb_on(2,1) >= 0
                     elseif Delta_PL < 0
                         Pb_on(1,1) + Pb_on(2,1) <= 0
-                        Pb_on(1,1) + Pb_on(2,1) <= max( OPTIONS.varphi * Delta_PL, rest_pmin_ESM )
+                        Pb_on(1,1) + Pb_on(2,1) <= upper_bound_ESM_N
                         Pb_on(1,1) + Pb_on(2,1) >= 2 * OPTIONS.Pb_Min
                     end
                 elseif operation_mode <= 7
@@ -616,13 +732,13 @@ elseif near_opt_optimal == 1
                         % the scaler factor is related with load power in each
                         % island part and the adjusting factor.
                         Pb_on(1,1) <= OPTIONS.Pb_Max
-                        Pb_on(1,1) <= max( OPTIONS.varphi * Delta_PL_island1, rest_pmax_ESM1 )
+%                         Pb_on(1,1) <= upper_bound_ESM1P
                         Pb_on(1,1) >= 0
                     elseif Delta_PL_island1 <0
                         % the scaler factor is related with load power in each
                         % island part and the adjusting factor.
                         Pb_on(1,1) <= 0
-                        Pb_on(1,1) <= max( OPTIONS.varphi * Delta_PL_island1, rest_pmin_ESM1 )
+%                         Pb_on(1,1) <= upper_bound_ESM1N
                         Pb_on(1,1) >= OPTIONS.Pb_Min 
                     end
                     
@@ -630,16 +746,17 @@ elseif near_opt_optimal == 1
                         % the scaler factor is related with load power in each
                         % island part and the adjusting factor.
                         Pb_on(2,1) <= OPTIONS.Pb_Max
-                        Pb_on(2,1) <= max( OPTIONS.varphi * Delta_PL_island2, rest_pmax_ESM2 )
+                        Pb_on(2,1) <= upper_bound_ESM2P
                         Pb_on(2,1) >= 0
                     elseif Delta_PL_island2 <0
                         % the scaler factor is related with load power in each
                         % island part and the adjusting factor.
                         Pb_on(2,1) <= 0
-                        Pb_on(2,1) <= max( OPTIONS.varphi * Delta_PL_island2, rest_pmin_ESM2 )
+                        Pb_on(2,1) <= upper_bound_ESM2N
                         Pb_on(2,1) >= OPTIONS.Pb_Min
                     end
                 end
+
 
                 % charging and discharging
                 E_on(1,1) <=  OPTIONS.E_Max(1)
@@ -666,9 +783,9 @@ elseif near_opt_optimal == 1
                     load_shedding_on(2) == zeros(1,1)
                     
                 elseif operation_mode <= 7
-                    for t_index = 1
-                        redundent_sw_s(1,:)*OPTIONS.Coupled_load(:,index_time) + OPTIONS.island1_load(1, t_index) - load_shedding_on(1,1) + Ppr_on(1,1) == (Pg_on(1,1)) + Pb_on(1,1) 
-                        redundent_sw_s(2,:)*OPTIONS.Coupled_load(:,index_time) + OPTIONS.island2_load(1, t_index) - load_shedding_on(2,1) == (Pg_on(2,1)) + Pb_on(2,1)
+                    for t_index = index_time
+                        redundent_sw_s(1:2,1).'*OPTIONS.Coupled_load(:,index_time) + OPTIONS.island1_load(1, t_index) - load_shedding_on(1,1) + Ppr_on(1,1) == (Pg_on(1,1)) + Pb_on(1,1) 
+                        redundent_sw_s(3:4,1).'*OPTIONS.Coupled_load(:,index_time) + OPTIONS.island2_load(1, t_index) - load_shedding_on(2,1) == (Pg_on(2,1)) + Pb_on(2,1)
                     end
                     
                     % load shedding range
@@ -711,10 +828,10 @@ elseif near_opt_optimal == 1
         
         Pg(1,index_time) = Pg_on(1,1);
         Pg(2,index_time) = Pg_on(2,1);
-        Pb(1,index_time) = Pb_on(1,1);
-        Pb(2,index_time) = Pb_on(2,1);
+        Pb(1,index_time) = roundn(Pb_on(1,1), -4);
+        Pb(2,index_time) = roundn(Pb_on(2,1), -4);
         Ppr(1,index_time) = Ppr_on(1,1);
-        E(1,index_time) = E_on(1,1); 
+        E(1,index_time) = E_on(1,1);
         E(2,index_time) = E_on(2,1);
         load_shedding(1:2,index_time) = load_shedding_on(1:2,1);
         
@@ -736,8 +853,8 @@ elseif near_opt_optimal == 1
 end
 
 %% startup cost: first startup cost and other startup cost
-startup = (delta_s(1:2,2:OPTIONS.N_t) - delta_s(1:2,1:OPTIONS.N_t-1)>=1);
-startup_cost = sum(OPTIONS.C_ss(1:2,1).'* startup ,2) + sum(OPTIONS.C_ss(1:2,1));
+startup = ( (delta_s(1:2,1:OPTIONS.N_t) - [0 delta_s(1,1:OPTIONS.N_t-1); 0 delta_s(2,1:OPTIONS.N_t-1)]) >=1);
+startup_cost = sum(OPTIONS.C_ss(1:2,1).'* startup ,2);
 one_item_cost = sum(OPTIONS.G(1,3) * delta_s(1,1:OPTIONS.N_t) ,2) + sum(OPTIONS.G(2,3) * delta_s(2,1:OPTIONS.N_t) ,2);
 
 objval_upperbound = sub_optval + startup_cost + one_item_cost;
@@ -746,6 +863,10 @@ dual_switch(1:2,:) = dual_Sp;
 dual_switch(3:4,:) = dual_Ss;
 dual_delta(1,:) = dual_delta_g1;
 dual_delta(2,:) = dual_delta_g2;
+
+if objval_upperbound == 5.5164e+04
+    disp(objval_upperbound);
+end
 
 % disp('upperbound');
 % disp(objval_upperbound);
@@ -783,30 +904,52 @@ cvx_solver Mosek
 cvx_begin quiet
     variable master_delta(OPTIONS.N_g, OPTIONS.N_t) binary
     variable master_redundent_switch(4, OPTIONS.N_t) binary
-    variable startup(OPTIONS.N_g, OPTIONS.N_t-1) binary
+    variable startup(OPTIONS.N_g, OPTIONS.N_t) binary
+%     variable startup_1th(OPTIONS.N_g, 1) binary
     variable switch_change(4, OPTIONS.N_t-1) binary
     variable benders_cut
 %     variable E(2,OPTIONS.N_t) nonnegative
 %     variable Pg(OPTIONS.N_g, OPTIONS.N_t) nonnegative
     minimize( sum(OPTIONS.G(1,3) * master_delta(1,1:OPTIONS.N_t) ,2) ...
             + sum(OPTIONS.G(2,3) * master_delta(2,1:OPTIONS.N_t) ,2) ...
-            + sum(OPTIONS.C_ss(1:2,1).'* startup ,2) + sum(OPTIONS.C_ss(1:2,1)) + benders_cut )
+            + sum(OPTIONS.C_ss(1:2,1).'* startup(1:2, 1:OPTIONS.N_t) ,2) ...
+            + benders_cut )
+%             + sum(OPTIONS.C_ss(1:2,1).'* startup_1th ,2) + benders_cut )
 
     subject to
         % startup detect
-        startup(1,1:OPTIONS.N_t-1) >= (master_delta(1,2:OPTIONS.N_t) - master_delta(1,1:OPTIONS.N_t-1))
-        startup(2,1:OPTIONS.N_t-1) >= (master_delta(2,2:OPTIONS.N_t) - master_delta(2,1:OPTIONS.N_t-1))
+        startup(1,1) >= master_delta(1,1)
+        startup(2,1) >= master_delta(2,1)
+        for t_index = 2:1:OPTIONS.N_t - OPTIONS.Tmin_g+1
+            startup(1,t_index) >= ( master_delta(1,t_index) - master_delta(1,t_index-1) )
+            startup(2,t_index) >= ( master_delta(2,t_index) - master_delta(2,t_index-1) )
+        end
+        
+        for t_index = OPTIONS.N_t - OPTIONS.Tmin_g+2:1:OPTIONS.N_t
+            0 >= ( master_delta(1,t_index) - master_delta(1,t_index-1) )
+            0 >= ( master_delta(2,t_index) - master_delta(2,t_index-1) )
+            0 >= startup(1,t_index)
+            0 >= startup(2,t_index)
+        end
+%         startup_1th(1,1) >= master_delta(1,1)
+%         startup_1th(2,1) >= master_delta(2,1)
+%         for t_index = 1:1:OPTIONS.N_t - 1
+%             startup(1,t_index) >= ( master_delta(1,t_index+1) - master_delta(1,t_index) )
+%             startup(2,t_index) >= ( master_delta(2,t_index+1) - master_delta(2,t_index) )
+%         end
         
         %  generator switch time
-        for t_index = 1:1:OPTIONS.N_t - OPTIONS.Tmin_g+1
-            master_delta(1,t_index:t_index+OPTIONS.Tmin_g-1) >= OPTIONS.Tmin_g * startup(t_index)
-            master_delta(2,t_index:t_index+OPTIONS.Tmin_g-1) >= OPTIONS.Tmin_g * startup(t_index)
+        sum(master_delta(1,1:OPTIONS.Tmin_g),2) >= OPTIONS.Tmin_g * startup(1,1)
+        sum(master_delta(2,1:OPTIONS.Tmin_g),2) >= OPTIONS.Tmin_g * startup(2,1)
+        for t_index = 2:1:OPTIONS.N_t - OPTIONS.Tmin_g+1
+            sum(master_delta(1,t_index:t_index + OPTIONS.Tmin_g-1),2) >= OPTIONS.Tmin_g * startup(1,t_index)
+            sum(master_delta(2,t_index:t_index + OPTIONS.Tmin_g-1),2) >= OPTIONS.Tmin_g * startup(2,t_index)
         end
-                 
+
         %  Redundent_switch
         master_redundent_switch(1,:) + master_redundent_switch(2,:) == ones(1, OPTIONS.N_t)
         master_redundent_switch(3,:) + master_redundent_switch(4,:) == ones(1, OPTIONS.N_t)
-        
+
 %         % switch change detect
 %         switch_change(1,1:OPTIONS.N_t-1) >= (master_redundent_switch(1,2:OPTIONS.N_t) - master_redundent_switch(1,1:OPTIONS.N_t-1))
 %         switch_change(2,1:OPTIONS.N_t-1) >= (master_redundent_switch(2,2:OPTIONS.N_t) - master_redundent_switch(2,1:OPTIONS.N_t-1))
@@ -876,8 +1019,10 @@ cvx_begin quiet
                     master_delta(1,1:OPTIONS.N_t)*OPTIONS.Pg_Max(1) + master_delta(2,1:OPTIONS.N_t)*OPTIONS.Pg_Max(2) +  OPTIONS.Pb_Max * ones(1,OPTIONS.N_t) >= OPTIONS.P_L_TIME_off + Ppr
                     master_delta(1,1:OPTIONS.N_t)*OPTIONS.Pg_Min(1) + master_delta(2,1:OPTIONS.N_t)*OPTIONS.Pg_Min(2) +  OPTIONS.Pb_Min * ones(1,OPTIONS.N_t) <= OPTIONS.P_total_vs + 0 % Ppr
                 elseif operation_mode <= 7 % fault mode
-                    master_delta(1,1:OPTIONS.N_t)*OPTIONS.Pg_Max(1) + master_delta(2,1:OPTIONS.N_t)*OPTIONS.Pg_Max(2) +  OPTIONS.Pb_Max * ones(1,OPTIONS.N_t) >= OPTIONS.island_total + Ppr
-                    master_delta(1,1:OPTIONS.N_t)*OPTIONS.Pg_Min(1) + master_delta(2,1:OPTIONS.N_t)*OPTIONS.Pg_Min(2) +  OPTIONS.Pb_Min * ones(1,OPTIONS.N_t) <= OPTIONS.island_mini + 0 % Ppr
+                    master_delta(1,1:OPTIONS.N_t)*OPTIONS.Pg_Max(1) + OPTIONS.Pb_Max * ones(1,OPTIONS.N_t) >= OPTIONS.island1_max + Ppr
+                    master_delta(1,1:OPTIONS.N_t)*OPTIONS.Pg_Min(1) + OPTIONS.Pb_Min * ones(1,OPTIONS.N_t) <= OPTIONS.island1_min + 0 % Ppr
+                    master_delta(2,1:OPTIONS.N_t)*OPTIONS.Pg_Max(2) + OPTIONS.Pb_Max * ones(1,OPTIONS.N_t) >= OPTIONS.island2_max
+                    master_delta(2,1:OPTIONS.N_t)*OPTIONS.Pg_Min(2) + OPTIONS.Pb_Min * ones(1,OPTIONS.N_t) <= OPTIONS.island2_min + 0 % Ppr
                 end    
             case 2
                 % only lower bound
@@ -892,15 +1037,21 @@ cvx_begin quiet
 %                 % speedup constraint: lower bound
 %                 benders_cut >= benders_cut_lowerbound
                 elseif operation_mode <= 7 % fault mode
-                    master_delta(1,1:OPTIONS.N_t)*OPTIONS.Pg_Max(1) + master_delta(2,1:OPTIONS.N_t)*OPTIONS.Pg_Max(2) +  OPTIONS.Pb_Max * ones(1,OPTIONS.N_t) >= OPTIONS.island_total + Ppr
-                    master_delta(1,1:OPTIONS.N_t)*OPTIONS.Pg_Min(1) + master_delta(2,1:OPTIONS.N_t)*OPTIONS.Pg_Min(2) +  OPTIONS.Pb_Min * ones(1,OPTIONS.N_t) <= OPTIONS.island_mini + 0 % Ppr
+                    master_delta(1,1:OPTIONS.N_t)*OPTIONS.Pg_Max(1) + OPTIONS.Pb_Max * ones(1,OPTIONS.N_t) >= OPTIONS.island1_max + Ppr
+                    master_delta(1,1:OPTIONS.N_t)*OPTIONS.Pg_Min(1) + OPTIONS.Pb_Min * ones(1,OPTIONS.N_t) <= OPTIONS.island1_min + 0 % Ppr
+                    master_delta(2,1:OPTIONS.N_t)*OPTIONS.Pg_Max(2) + OPTIONS.Pb_Max * ones(1,OPTIONS.N_t) >= OPTIONS.island2_max
+                    master_delta(2,1:OPTIONS.N_t)*OPTIONS.Pg_Min(2) + OPTIONS.Pb_Min * ones(1,OPTIONS.N_t) <= OPTIONS.island2_min + 0 % Ppr
                 end
 
                 % speedup constraint: lower bound
-                benders_cut >= benders_cut_lowerbound
+%                 benders_cut >= benders_cut_lowerbound
             otherwise % non-constriant
         end        
 cvx_end
+        
+if strcmp(cvx_status, 'Infeasible')
+    disp('stop');
+end
 
 redundent_sw = master_redundent_switch;
 
