@@ -1,8 +1,5 @@
 time_slot = [6 12 24];
 voya_distance = [70 150 300 ];
-optimal = 0;
-LNBD = 1; % Low-complexity near-optimal algorithm
-% algorithm = [optimal LNBD];
 
 % finished 1th performance analysis: different distance for testing load shedding and reduced distances
 No_test = 1;
@@ -26,7 +23,7 @@ for index_distance = 3:1:3
 %         end
 
     [data_1th(index_distance).optimal_cost_related, data_1th(index_distance).complexity, data_1th(index_distance).LS, data_1th(index_distance).RD_SW]  ...
-        = cost_optimization_for_test_benders( time_slot(2), voya_distance_test(index_distance),complete_accelerate, optimal_alg, mode_with_all_methods_fault, No_test  );
+        = cost_optimization_for_test_benders( time_slot(2), voya_distance_test(index_distance),complete_accelerate, optimal_alg, mode_with_all_methods_fault, No_test, varphi_Pl, varphi_Ppr);
     
     data_1th(1).only_operation_cost(1,index_distance) = data_1th(index_distance).optimal_cost_related(1,end);
     data_1th(1).only_complexity(1,index_distance) = sum(data_1th(index_distance).complexity(3,:));
