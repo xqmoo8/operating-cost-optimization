@@ -16,15 +16,43 @@ maxi_time_slot = 2;
 
 % only_operation_cost = zeros(maxi_time_slot, length(varphi)+1);
 
-for index_varphi_Pl = 1:1:11
-    for index_varphi_Ppr = 1:1:11
-        for index_algorithm = 0:1
-            [optimal_cost ] = cost_optimization_for_test_benders( time_slot,  ...
-                voya_distance, complete_accelerate, index_algorithm, fault_all_methods, No_test, varphi_Pl(index_varphi_Pl), varphi_Ppr(index_varphi_Ppr));
+total_cost_comparison = zeros(12,11);
 
-            data_0th(index_varphi_Pl).compare_cost(index_varphi_Pl, index_algorithm+1) = optimal_cost(2, end);
-        end
+for index_varphi_Ppr = 1:1:11
+    for index_varphi_Pl = 1:1:11
+            [suboptimal_cost, cost_for_comparison] = cost_optimization_for_test_benders( time_slot,  ...
+                voya_distance, complete_accelerate, LNBD, fault_all_methods, No_test, varphi_Pl(index_varphi_Pl), varphi_Ppr(index_varphi_Ppr));
+
+            total_cost_comparison(index_varphi_Pl + (index_varphi_Ppr-1)*11, 1) = suboptimal_cost(2, end);
+            total_cost_comparison(index_varphi_Pl + (index_varphi_Ppr-1)*11, 2:5) = cost_for_comparison;
     end
 end
 
-save('data_0th.mat','data_0th');
+[optimal_cost, cost_for_comparison] = cost_optimization_for_test_benders( time_slot,  ...
+    voya_distance, complete_accelerate, optimal, fault_all_methods, No_test);
+
+total_cost_comparison(122, 1) = optimal_cost(2, end);
+ total_cost_comparison(122, 2:5) = cost_for_comparison;
+
+save('total_cost_comparison.mat','total_cost_comparison');
+
+total_comparison.three_cost = total_cost_comparison;
+total_comparison.cost_LS_RD(:, 1) = total_cost_comparison(:, 2);
+total_comparison.cost_LS_RD(:, 2) = total_cost_comparison(:, 3) / OPTIONS.Penalty_L;
+total_comparison.cost_LS_RD(:, 3) = total_cost_comparison(:, 4) / (1.02 * OPTIONS.Penalty_D);
+
+index = 0;
+for index_varphi_Ppr = 1:1:11
+    for index_varphi_Pl = 1:1:11
+            if varphi_Pl(index_varphi_Pl) + varphi_Ppr(index_varphi_Ppr) == 1
+                index = index+1;
+                index_parameter_1(index) = index_varphi_Pl + (index_varphi_Ppr-1)*11;
+            end
+    end
+end
+
+for index = 1:length(index_parameter_1)
+    total_comparison.three_cost_lite(index, 1:5) = total_comparison.three_cost(index_parameter_1(index), 1:5);
+    total_comparison.cost_LS_RD_lite(index, 1:3) = total_comparison.cost_LS_RD(index_parameter_1(index), 1:3);
+end
+

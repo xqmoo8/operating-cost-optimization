@@ -1,5 +1,5 @@
 %% the main struture of benders decomposition algorithm
-function [optimal_cost, time_val_problem ] ...
+function [optimal_cost, cost_for_comparison ] ...
          = cost_optimization_for_test_benders( time_slot, voya_distance, accelerate_flag_input, near_opt_optimal_input, operation_mode_input, No_test_in, varphi_Pl, varphi_Ppr )
 global OPTIONS total_sub total_P total_dual accelerate_flag upper_of_lowerbound benders_index
 % decomposition_flag
@@ -64,11 +64,15 @@ else
     No_test = No_test_in;
 end
 
-if ~exist('varphi', 'var')
+if ~exist('varphi_Pl', 'var')
     OPTIONS.varphi_Pl = 0.7;
-    OPTIONS.varphi_Ppr = 0.7;
 else
     OPTIONS.varphi_Pl = varphi_Pl;
+end
+
+if ~exist('varphi_Ppr', 'var')
+    OPTIONS.varphi_Ppr = 0.7;
+else
     OPTIONS.varphi_Ppr = varphi_Ppr;
 end
 
@@ -178,13 +182,13 @@ for benders_index = 1: 800
 end
 
 optimal_cost = [best_lowerbound(1:benders_index-1); best_upperbound(2:benders_index); ];
-save_optimal_cost_information(No_test, near_opt_optimal, optimal_cost, sub_P, delta_g, redundent_sw, reduced_distance, operation_mode );
+cost_for_comparison = save_optimal_cost_information(No_test, near_opt_optimal, optimal_cost, sub_P, delta_g, redundent_sw, reduced_distance, operation_mode );
 
 plot_result(optimal_cost);
 end
 
 %% Save optimal operation status
-function save_optimal_cost_information(No_test, near_opt_optimal, optimal_cost, sub_P, delta_g, redundent_sw, reduced_distance, operation_mode )
+function [cost_for_comparison] = save_optimal_cost_information(No_test, near_opt_optimal, optimal_cost, sub_P, delta_g, redundent_sw, reduced_distance, operation_mode )
 global OPTIONS accelerate_flag
 operating_cost = OPTIONS.G(1:OPTIONS.N_g, 1).' * power(sub_P.Pg(1:OPTIONS.N_g, 1:OPTIONS.N_t), 2) ...
                + OPTIONS.G(1:OPTIONS.N_g, 2).' * sub_P.Pg(1:OPTIONS.N_g, 1:OPTIONS.N_t) ...
@@ -195,7 +199,7 @@ Penalty_cost_LS =  OPTIONS.Penalty_L * sum(sub_P.load_shedding(1:2, 1:OPTIONS.N_
 Penalty_cost_D = 1.02 * OPTIONS.Penalty_D * reduced_distance;
 startup_g =  delta_g(1:OPTIONS.N_g, 1:OPTIONS.N_t) - [zeros(OPTIONS.N_g,1) delta_g(1:OPTIONS.N_g, 1:OPTIONS.N_t-1)];
 startup_cost = OPTIONS.C_ss(1:OPTIONS.N_g,1).'* (round(startup_g) > 0);
-operating_cost = operating_cost + startup_cost + Penalty_cost_LS;
+operating_cost = operating_cost + startup_cost;
 
 % total cost obtained from the master problem
 data.cost(1, 1) = optimal_cost(1, end);
@@ -207,8 +211,11 @@ data.cost(3, 1) = sum(operating_cost, 2);
 data.cost(3, 2) = sum(Penalty_cost_LS, 2);
 % penalty cost of reduced distance
 data.cost(3, 3) = Penalty_cost_D;
-% total cost of operating cost and penalty cost
-data.cost(3, 4) = data.cost(3, 1) + data.cost(3, 2);
+% total cost of operating cost, two terms of penalty cost
+data.cost(3, 4) = sum(operating_cost) + sum(Penalty_cost_LS) + Penalty_cost_D;
+
+% data for parameter passing
+cost_for_comparison = data.cost(3, 1:4);
 
 total_switching = sum( abs(redundent_sw(1,1) - OPTIONS.initial_redundent_sw(1,1)) ) + sum(abs(redundent_sw(3,1) - OPTIONS.initial_redundent_sw(3,1))) ...
         + sum( abs(redundent_sw(1,2:OPTIONS.N_t) - redundent_sw(1,1:OPTIONS.N_t-1)) ) + sum(abs(redundent_sw(3,2:OPTIONS.N_t) - redundent_sw(3,1:OPTIONS.N_t-1)));
@@ -219,7 +226,7 @@ data.power(5, 1:OPTIONS.N_t) =  sub_P.Ppr;
 data.power(6:7, 1:OPTIONS.N_t) =  sub_P.load_shedding;
 data.power(7, 1:OPTIONS.N_t) =  sum(sub_P.Pg + sub_P.Pb, 1) - sub_P.Ppr;
 data.power(8:8+OPTIONS.N_g-1, 1:OPTIONS.N_t) =  sub_P.Pc;
-data.power(10,:) = OPTIONS.P_L_TIME_off(1,1:OPTIONS.N_t);
+% data.power(10,:) = OPTIONS.P_L_TIME_off(1,1:OPTIONS.N_t);
 
 data.status(1:OPTIONS.N_g, 1:OPTIONS.N_t) = delta_g;
 data.status(OPTIONS.N_g+1:OPTIONS.N_g+2, 1:OPTIONS.N_t) = [redundent_sw(1,1:OPTIONS.N_t); redundent_sw(3,1:OPTIONS.N_t)];
@@ -228,10 +235,10 @@ data.status(OPTIONS.N_g+3, 1) = total_switching;
 data.distance(1, 1:2) = [OPTIONS.Distance reduced_distance];
 
 if near_opt_optimal ==0
-    filename = ['optimal_data_mode_',num2str(operation_mode),'_D.',num2str(OPTIONS.Distance),...
+    filename = ['optimal_mode_',num2str(operation_mode),'_D.',num2str(OPTIONS.Distance),...
                 '_T.',num2str(OPTIONS.N_t),'_Ac.',num2str(accelerate_flag),'_No.',num2str(No_test),'.mat'];
 elseif near_opt_optimal ==1
-    filename = ['LNBD_data_mode_',num2str(operation_mode),'_D.',num2str(OPTIONS.Distance),...
+    filename = ['LNBD_mode_',num2str(operation_mode),'_D.',num2str(OPTIONS.Distance),'_varphi',num2str(OPTIONS.varphi_Pl),...
                 '_T.',num2str(OPTIONS.N_t),'_Ac.',num2str(accelerate_flag),'_No.',num2str(No_test),'.mat'];
 end
 save(filename,'data');
@@ -731,7 +738,12 @@ global OPTIONS benders_index
 Rest_Distance = OPTIONS.Distance;
 Rest_ppr_avg = OPTIONS.P_pr_avg;
 sub_optval_on = 0;
-p_ESM_avg = sum(OPTIONS.E_Max) - sum(OPTIONS.E_Min);
+if operation_mode <= 3
+    p_ESM_avg = (sum(OPTIONS.E_Max) - sum(OPTIONS.E_Min))/OPTIONS.N_t;
+elseif operation_mode <= 7
+    p_ESM1_avg = (OPTIONS.E_Max(1) - OPTIONS.E_Min(1))/OPTIONS.N_t;
+    p_ESM2_avg = (OPTIONS.E_Max(2) - OPTIONS.E_Min(2))/OPTIONS.N_t;
+end
 
 % update the rest parameters: rest distance, rest average ppr, and the
 % power deviation of load at next time slot.
@@ -740,7 +752,7 @@ for index_time = 1:OPTIONS.N_t
         % all the load demand must be meet at the last time slot (N_t). 
         % So varphi = 1
         case OPTIONS.N_t
-            sub_varphi_Pl = 1;
+            sub_varphi_Pl = OPTIONS.varphi_Pl;
             sub_varphi_Ppr = 0.0;
             
         % the load demand at other time slot is meet proportionally.
@@ -791,9 +803,11 @@ for index_time = 1:OPTIONS.N_t
         % charge and discharge bound in island 1
         if sum(delta_g(1,index_time))>=1
             if OPTIONS.Delta_PL_island1(index_time) >= 0
-                upper_bound_ESM1P = roundn(min(p_ESM_avg + sub_varphi_Pl * OPTIONS.Delta_PL_island1, rest_pmax_ESM1), -2);
+                upper_bound_ESM1P = roundn(min(p_ESM1_avg + ...
+                    sub_varphi_Pl * OPTIONS.Delta_PL_island1(index_time), rest_pmax_ESM1), -2);
             else
-                upper_bound_ESM1P = roundn(max(p_ESM_avg + sub_varphi_Pl * OPTIONS.Delta_PL_island1, rest_pmin_ESM1), -2);
+                upper_bound_ESM1P = roundn(max(p_ESM1_avg + ...
+                    sub_varphi_Pl * OPTIONS.Delta_PL_island1(index_time), rest_pmin_ESM1), -2);
             end
         else
             upper_bound_ESM1P = OPTIONS.E_Max(1) - OPTIONS.E_Min(1);
@@ -801,9 +815,11 @@ for index_time = 1:OPTIONS.N_t
         % charge and discharge bound in i
         if sum(delta_g(2,index_time))>=1
             if OPTIONS.Delta_PL_island2(index_time) >= 0
-                upper_bound_ESM2P = roundn(min(p_ESM_avg + sub_varphi_Pl * OPTIONS.Delta_PL_island2, rest_pmax_ESM2), -2);
+                upper_bound_ESM2P = roundn(min(p_ESM2_avg + ...
+                    sub_varphi_Pl * OPTIONS.Delta_PL_island2(index_time), rest_pmax_ESM2), -2);
             else
-                upper_bound_ESM2P = roundn(max(p_ESM_avg + sub_varphi_Pl * OPTIONS.Delta_PL_island2, rest_pmin_ESM2), -2);
+                upper_bound_ESM2P = roundn(max(p_ESM2_avg + ...
+                    sub_varphi_Pl * OPTIONS.Delta_PL_island2(index_time), rest_pmin_ESM2), -2);
             end
         else
             upper_bound_ESM2P = OPTIONS.E_Max(2) - OPTIONS.E_Min(2);
