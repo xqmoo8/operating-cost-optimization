@@ -1,7 +1,7 @@
 %% the main struture of benders decomposition algorithm
 function [cost_for_comparison, final_consumed_time ] ...
-         = cost_optimization_for_test_benders( time_slot, voya_distance, accelerate_flag_input, near_opt_optimal_input, operation_mode_input, No_test_in, varphi_Pl, varphi_Ppr )
-global OPTIONS total_sub total_P total_dual accelerate_flag upper_of_lowerbound 
+         = cost_optimization_for_test_benders( time_slot, voya_distance, accelerate_flag_input, near_opt_optimal_input, operation_mode_input, No_test_in, para_LNBD)
+global OPTIONS total_sub total_P total_dual accelerate_flag upper_of_lowerbound with_iteration_D
 %% the adjusted parameters 
 dbstop if error
 
@@ -25,7 +25,7 @@ end
 % 3 only power range
 % 4 only lower bound
 if ~exist('accelerate_flag_input', 'var')
-    accelerate_flag = 4;
+    accelerate_flag = 1;
 else
     accelerate_flag = accelerate_flag_input;
 end
@@ -34,7 +34,7 @@ end
 % 0 optimal algorithm
 % 1 LNBD
 if ~exist('near_opt_optimal_input', 'var')
-    near_opt_optimal = 0;
+    near_opt_optimal = 1;
 else
     near_opt_optimal = near_opt_optimal_input;
 end
@@ -66,7 +66,7 @@ end
 % 10 (Fault w PPA w ESMC)
 % 11 (Fault w PPA w ESMC w load shedding & reconfiguration)
 if ~exist('operation_mode_input', 'var')
-    operation_mode = 7;
+    operation_mode = 3;
     if operation_mode == 3
         operation_mode = 2;
     end
@@ -82,18 +82,21 @@ else
 end
 
 % Adjustment parameter of load range in LNBD
-if ~exist('varphi_Pl', 'var')
+% Adjustment parameter of propulsion power in LNBD
+% with_iteration_D
+if ~exist('para_LNBD', 'var')
     OPTIONS.varphi_Pl = 0.7;
+    OPTIONS.varphi_Ppr = 0.7;
+    with_iteration_D = 0;
 else
-    OPTIONS.varphi_Pl = varphi_Pl;
+    OPTIONS.varphi_Pl = para_LNBD(1);
+    OPTIONS.varphi_Ppr = para_LNBD(2);
+    with_iteration_D = para_LNBD(3);
 end
 
-% Adjustment parameter of propulsion power in LNBD
-if ~exist('varphi_Ppr', 'var')
-    OPTIONS.varphi_Ppr = 0.7;
-else
-    OPTIONS.varphi_Ppr = varphi_Ppr;
-end
+% if ~exist('varphi_Ppr', 'var')
+% else
+% end
 
 %% inintial part
 % initial the parameters
@@ -115,9 +118,9 @@ consumed_time = zeros(3, Max_iteration);
 RD = zeros(1, Max_iteration);
 
 % initial the objective value and dual variable 
-if operation_mode <=3
+if near_opt_optimal == 0
     total_sub(1).sub_optval = 0;
-else
+elseif near_opt_optimal == 1
     total_sub(1).sub_optval = zeros(OPTIONS.N_g, OPTIONS.N_t+1);
 end
 total_sub(1).delta_g = delta_g;
@@ -330,7 +333,7 @@ elseif near_opt_optimal ==1
     filename = ['LNBD_mode_',num2str(operation_mode),'_D.',num2str(OPTIONS.Distance),'_varphi',num2str(OPTIONS.varphi_Pl),...
                 '_T.',num2str(OPTIONS.N_t),'_Ac.',num2str(accelerate_flag),'_No.',num2str(No_test),'.mat'];
 end
-save(filename,'data');
+% save(filename,'data');
 
 end
 
@@ -505,7 +508,8 @@ switch parameter_test
 end
 
 OPTIONS.E(1:2,1:2) = [1 0.5; 1 0.5];
-OPTIONS.C_ss = [90; 45];
+% OPTIONS.C_ss = [90; 45];
+OPTIONS.C_ss = [0; 0];
 OPTIONS.R_G = OPTIONS.Pg_Max*0.75;
 % OPTIONS.R_G = [2 2];
 OPTIONS.error = 1e-3;
@@ -903,7 +907,7 @@ function [objval_upperbound, sub_optval, sub_P, sub_dual, reduced_distance] = op
 % in this function, the return variable: suboptval is different with that
 % in the function of optimal algorithm.
 
-global OPTIONS benders_index
+global OPTIONS benders_index with_iteration_D
 % XXX_on denotes the variable that calculated in this iteration.
 % inital the rest parameters
 Pg = zeros(OPTIONS.N_g, OPTIONS.N_t);
@@ -921,6 +925,7 @@ dual_delta_g2 = zeros(1, OPTIONS.N_t);
 
 Rest_Distance = OPTIONS.Distance;
 Rest_ppr_avg = OPTIONS.P_pr_avg;
+D_d = 0;
 sub_optval_on = 0;
 sub_optval_t = zeros(1, OPTIONS.N_t+1);
 sub_optval = zeros(2, OPTIONS.N_t+1);
@@ -1098,7 +1103,7 @@ for index_time = 1:OPTIONS.N_t
     if strcmp(cvx_status, 'Infeasible')
         disp('stop');
     end
-    
+
     Pg(1:OPTIONS.N_g, index_time) = Pg_on(1:OPTIONS.N_g, 1);
     Pb(1:OPTIONS.N_e, index_time) = Pb_on(1:OPTIONS.N_g, 1);
     E(1:OPTIONS.N_e, index_time) = E_on(1:OPTIONS.N_g, 1);
@@ -1106,21 +1111,41 @@ for index_time = 1:OPTIONS.N_t
     Pd(1:OPTIONS.N_g, index_time) = Pd_on(1:OPTIONS.N_g, 1);
     Ppr(1, index_time) = Ppr_on(1, 1);
     load_shedding(1:2, index_time) = load_shedding_on(1:2, 1);
-
-    Rest_Distance =  Rest_Distance - Distance_slot_obj + reduced_distance_on;
-    Rest_velocity_avg = Rest_Distance/(OPTIONS.N_t-index_time);
-    Rest_ppr_avg = (Rest_velocity_avg).^3*2.2e-3;
     
-    % the penalty cost of reduced distance is calculated at the last
-    % iteration, thus it must subtract the penalty cost in the total cost
-    %  before the last iteration.
-    if index_time < OPTIONS.N_t
-        sub_optval_t(index_time) = cvx_optval - 1.02 * OPTIONS.Penalty_D * reduced_distance_on;
-        sub_optval_on = sub_optval_on + sub_optval_t(index_time);
-    else
+    % with_iteration_D = 0: D(t) is only adjusted by load change and
+    % varphi_Pl. sub_optval equals to cvx_optval
+    % with_iteration_D = 1: D(t) is iterated at each time slot based on the
+    % load change, varphi_Pl and D_d of last time slot. 
+    
+    if with_iteration_D == 0
+%         Rest_Distance =  Rest_Distance - Distance_slot_obj;
+%         Rest_velocity_avg = Rest_Distance/(OPTIONS.N_t-index_time);
+        Rest_ppr_avg = OPTIONS.P_pr_avg;
+        sub_optval_t(index_time) = cvx_optval;
         sub_optval_on = sub_optval_on + cvx_optval;
-        sub_optval_t(index_time) = cvx_optval - 1.02 * OPTIONS.Penalty_D * reduced_distance_on;
-        sub_optval_t(index_time+1) = 1.02 * OPTIONS.Penalty_D * reduced_distance_on;
+        D_d = D_d + reduced_distance_on;
+        if index_time == OPTIONS.N_t
+            Rest_Distance = D_d;
+        end
+    elseif with_iteration_D == 1
+        Rest_Distance =  Rest_Distance - Distance_slot_obj + reduced_distance_on;
+        if index_time < OPTIONS.N_t
+            Rest_velocity_avg = Rest_Distance/(OPTIONS.N_t-index_time);
+        end 
+        Rest_ppr_avg = (Rest_velocity_avg).^3*2.2e-3;
+
+        % the penalty cost of reduced distance is calculated at the last
+        % iteration, thus it must subtract the penalty cost in the total cost
+        %  before the last iteration.
+        if index_time < OPTIONS.N_t
+            sub_optval_t(index_time) = cvx_optval - 1.02 * OPTIONS.Penalty_D * reduced_distance_on;
+            sub_optval_on = sub_optval_on + sub_optval_t(index_time);
+        else
+            sub_optval_on = sub_optval_on + cvx_optval;
+            sub_optval_t(index_time) = cvx_optval - 1.02 * OPTIONS.Penalty_D * reduced_distance_on;
+            sub_optval_t(index_time+1) = 1.02 * OPTIONS.Penalty_D * reduced_distance_on;
+        end
+    elseif with_iteration_D == 2
     end
 
     dual_Sp(1:2, index_time) = temp_dual_Sp;
@@ -1233,7 +1258,7 @@ end
 
 %% LNBD algorithm: the master problem which is used to determine the redundent switches and generator state
 function [master_optval, master_delta_g, master_redundent_switch, benders_cut ] = optimization_masterproblem_t( operation_mode, benders_cut_lowerbound, Max_benders_iteration )
-global OPTIONS accelerate_flag  total_P upper_of_lowerbound total_sub total_dual 
+global OPTIONS accelerate_flag  total_P upper_of_lowerbound total_sub total_dual with_iteration_D 
 % global total_sub total_dual
 
 if Max_benders_iteration == 0
@@ -1279,7 +1304,7 @@ for index_time  = 1:OPTIONS.N_t
             redundent_switch_on(3, 1) + redundent_switch_on(4, 1) == 1;
 
             % in the normal mode, redundent switches are determined.
-            if operation_mode <= 3 
+            if operation_mode <= 3
                 redundent_switch_on(1, 1) == total_sub(1).redundent_sw(1, index_time);
                 redundent_switch_on(2, 1) == total_sub(1).redundent_sw(2, index_time);
                 redundent_switch_on(3, 1) == total_sub(1).redundent_sw(3, index_time);
@@ -1287,7 +1312,7 @@ for index_time  = 1:OPTIONS.N_t
 
                 % benders cuts
                 for index_benders = 1:Max_benders_iteration
-                    benders_cut >=  total_sub(index_benders).sub_optval ...
+                    benders_cut >=  total_sub(index_benders).sub_optval(2, index_time) ...
                                     + total_dual(index_benders).delta_g(1, index_time) ...
                                       * (delta_g_on(1, 1).' - total_sub(index_benders).delta_g(1, index_time).') ...
                                     + total_dual(index_benders).delta_g(2, index_time) ...
@@ -1336,7 +1361,7 @@ for index_time  = 1:OPTIONS.N_t
                         end
                     end
                     % speedup constraint: lower bound
-                    benders_cut >= benders_cut_lowerbound;
+%                     benders_cut >= benders_cut_lowerbound;
                 case 3
                     % speedup constraints: power range
                     if operation_mode <=3 % normal mode
@@ -1365,7 +1390,13 @@ for index_time  = 1:OPTIONS.N_t
     master_redundent_switch(1:4, index_time) = redundent_switch_on(1:4, 1);
     sub_optval_on = sub_optval_on + cvx_optval;
 end
-master_optval = sub_optval_on + total_sub(index_benders).sub_optval(2, OPTIONS.N_t);
+
+% the related description is given in the function of subproblem
+if with_iteration_D == 0
+    master_optval = sub_optval_on;
+elseif with_iteration_D == 1
+    master_optval = sub_optval_on + total_sub(Max_benders_iteration).sub_optval(2, OPTIONS.N_t);
+end
         
 if strcmp(cvx_status, 'Infeasible')
     disp('stop');
