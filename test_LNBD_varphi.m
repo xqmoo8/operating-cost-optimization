@@ -19,7 +19,7 @@ maxi_time_slot = 2;
 
 total_results = zeros(122,11);
 % the 4-th is not important.
-for index_mode = 7:4:7
+for index_mode = 3:4:3
     for index_iteration_D = 0:1
         for index_accelerate = 1:2
             for index_varphi_Ppr = 1:1:11
@@ -59,7 +59,8 @@ for index_mode = 7:4:7
             end
             total_comparison.cost_LS_RD_lite(12, 1:6) = total_comparison.cost_LS_RD(122, 1:6);
 
-            filename = ['total_comparison_Ac.', num2str(index_accelerate), '_iter_D.', num2str(index_iteration_D),  '.mat'];
+            filename = ['total_comparison_Ac.', num2str(index_accelerate), '_iterD.', ...
+                        num2str(index_iteration_D), '_Mode.', num2str(index_mode),  '.mat'];
             save(filename,'total_comparison');
         end
     end

@@ -66,12 +66,12 @@ end
 % 10 (Fault w PPA w ESMC)
 % 11 (Fault w PPA w ESMC w load shedding & reconfiguration)
 if ~exist('operation_mode_input', 'var')
-    operation_mode = 3;
+    operation_mode = 2;
+else
+    operation_mode = operation_mode_input;
     if operation_mode == 3
         operation_mode = 2;
     end
-else
-    operation_mode = operation_mode_input;
 end
 
 % Test ID for saving results
@@ -628,8 +628,12 @@ cvx_begin quiet
                  OPTIONS.P_L_TIME_off(1, t_index) - sum(load_shedding(1:2, t_index)) + Ppr(1, t_index) == sum( Pg(1:OPTIONS.N_g, t_index) ) + sum(Pb(1:OPTIONS.N_e, t_index) )
             end
             % load shedding range
-            load_shedding(1, 1:OPTIONS.N_t) == zeros(1, OPTIONS.N_t)
-            load_shedding(2, 1:OPTIONS.N_t) == zeros(1, OPTIONS.N_t)
+            if operation_mode == 3
+                load_shedding(1, 1:OPTIONS.N_t) + load_shedding(2, 1:OPTIONS.N_t) <= OPTIONS.P_no
+            else
+                load_shedding(1, 1:OPTIONS.N_t) == zeros(1, OPTIONS.N_t)
+                load_shedding(2, 1:OPTIONS.N_t) == zeros(1, OPTIONS.N_t)
+            end
         elseif operation_mode <= 7
             % semi-island mode operation with load shedding and
             % reconfiguration (only in mode 7)
@@ -1059,7 +1063,18 @@ for index_time = 1:OPTIONS.N_t
             end
 
             % system power balance & load shedding
-            if (operation_mode == 3) || (operation_mode == 7)
+            if operation_mode <= 3
+                OPTIONS.P_L_TIME_off(1, index_time) - sum(load_shedding_on(1:2, 1)) + Ppr_on(1, 1) ...
+                     == sum( Pg_on(1:OPTIONS.N_g, 1) ) + sum(Pb_on(1:OPTIONS.N_e, 1))
+
+                % load shedding range
+                if operation_mode == 3
+                    sum(load_shedding_on(1:2, 1)) <= OPTIONS.P_no(index_time)
+                else
+                    load_shedding_on(1) == zeros(1, 1)
+                    load_shedding_on(2) == zeros(1, 1)
+                end
+            elseif operation_mode <= 7
                 for t_index = index_time
                     redundent_sw_s(1:2, 1).' * OPTIONS.Coupled_load(:, index_time) + OPTIONS.island1_load(1, t_index) ...
                         - load_shedding_on(1, 1) + Ppr_on(1, 1) == (Pg_on(1, 1)) + Pb_on(1, 1) 
@@ -1068,16 +1083,27 @@ for index_time = 1:OPTIONS.N_t
                 end
 
                 % load shedding range
-                load_shedding_on(1) <= OPTIONS.island1_non_load(1, index_time)
-                load_shedding_on(2) <= OPTIONS.island2_non_load(1, index_time)
-            else
-                 OPTIONS.P_L_TIME_off(1, index_time) - sum(load_shedding_on(1, 1)) + Ppr_on(1, 1) ...
-                     == sum( Pg_on(1:OPTIONS.N_g, 1) ) + sum(Pb_on(1:OPTIONS.N_e, 1))
+                if operation_mode == 7 
+                    load_shedding_on(1) <= OPTIONS.island1_non_load(1, index_time)
+                    load_shedding_on(2) <= OPTIONS.island2_non_load(1, index_time)
+                else
+                    load_shedding_on(1) == zeros(1, 1)
+                    load_shedding_on(2) == zeros(1, 1)
+                end
+            elseif operation_mode <= 11
+                for t_index = index_time
+                    OPTIONS.island1_load(1, t_index) - load_shedding_on(1, 1) + Ppr_on(1, 1) == (Pg_on(1, 1)) + Pb_on(1, 1) 
+                    OPTIONS.island2_load(1, t_index) - load_shedding_on(2, 1) == (Pg_on(2, 1)) + Pb_on(2, 1)
+                end
 
                 % load shedding range
-                load_shedding_on(1) == zeros(1, 1)
-                load_shedding_on(2) == zeros(1, 1)
-
+                if operation_mode == 11 
+                    load_shedding_on(1) <= OPTIONS.island1_non_load(1, index_time)
+                    load_shedding_on(2) <= OPTIONS.island2_non_load(1, index_time)
+                else
+                    load_shedding_on(1) == zeros(1, 1)
+                    load_shedding_on(2) == zeros(1, 1)
+                end
             end
 
             temp_dual_Sp : redundent_sw_s(1:2, 1) == redundent_sw(1:2, index_time)
