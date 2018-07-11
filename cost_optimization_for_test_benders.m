@@ -5,6 +5,8 @@ global OPTIONS total_sub total_P total_dual accelerate_flag upper_of_lowerbound 
 %% the adjusted parameters 
 dbstop if error
 
+case_numb = 2;
+
 % The number of operation time slot
 if ~exist('time_slot', 'var')
     OPTIONS.N_t = 10;
@@ -25,7 +27,7 @@ end
 % 3 only power range
 % 4 only lower bound
 if ~exist('accelerate_flag_input', 'var')
-    accelerate_flag = 1;
+    accelerate_flag = 2;
 else
     accelerate_flag = accelerate_flag_input;
 end
@@ -34,7 +36,7 @@ end
 % 0 optimal algorithm
 % 1 LNBD
 if ~exist('near_opt_optimal_input', 'var')
-    near_opt_optimal = 1;
+    near_opt_optimal = 0;
 else
     near_opt_optimal = near_opt_optimal_input;
 end
@@ -76,7 +78,7 @@ end
 
 % Test ID for saving results
 if ~exist('No_test_in', 'var')
-    No_test = 0;
+    No_test = 1;
 else
     No_test = No_test_in;
 end
@@ -92,6 +94,15 @@ else
     OPTIONS.varphi_Pl = para_LNBD(1);
     OPTIONS.varphi_Ppr = para_LNBD(2);
     with_iteration_D = para_LNBD(3);
+end
+
+% number of ESM modules
+if case_numb == 1
+    OPTIONS.N_g = 2;
+    OPTIONS.N_e = 4;
+elseif case_numb == 2
+    OPTIONS.N_g = 3;
+    OPTIONS.N_e = 3;
 end
 
 % if ~exist('varphi_Ppr', 'var')
@@ -121,7 +132,7 @@ consumed_time = zeros(3, Max_iteration);
 RD = zeros(1, Max_iteration);
 min_reduced_distance = +inf;
 Ppr_best_solution = zeros(1, OPTIONS.N_t);
-% Ppr_max_lowerbound = ones(1, OPTIONS.N_t)* sum(OPTIONS.Pg_Max);
+% Ppr_max_lowerbound = ones(1, OPTIONS.N_t)* sum(OPTIONS.Pg_Max); 
 
 % initial the objective value and dual variable 
 if near_opt_optimal == 0
@@ -211,8 +222,6 @@ for benders_index = 1:800
     total_dual(benders_index).delta_g = sub_dual.delta_g;
     total_dual(benders_index).switch = sub_dual.switch;
     RD(benders_index) = reduced_distance;
-    
-    
     
     if objval_lowerbound(benders_index) > upper_of_lowerbound
         upper_of_lowerbound = objval_lowerbound(benders_index);
@@ -332,12 +341,19 @@ total_switching = sum(abs(best_solution.redundant_sw(1,1) - OPTIONS.initial_redu
                 + sum(abs(best_solution.redundant_sw(1,2:OPTIONS.N_t) - best_solution.redundant_sw(1,1:OPTIONS.N_t-1)) ) ...
                 + sum(abs(best_solution.redundant_sw(2,2:OPTIONS.N_t) - best_solution.redundant_sw(2,1:OPTIONS.N_t-1)));
 
-data.power(1:OPTIONS.N_g, 1:OPTIONS.N_t) =  best_solution.Pg;
-data.power(OPTIONS.N_g+1 : OPTIONS.N_g+OPTIONS.N_e, 1:OPTIONS.N_t) =  best_solution.Pb;
-data.power(5, 1:OPTIONS.N_t) =  best_solution.Ppr;
-data.power(6:7, 1:OPTIONS.N_t) =  best_solution.load_shedding;
-data.power(8, 1:OPTIONS.N_t) =  sum(best_solution.Pg + best_solution.Pb, 1) - best_solution.Ppr;
-data.power(9:9+OPTIONS.N_g-1, 1:OPTIONS.N_t) =  best_solution.Pc;
+data.Pgc(1:OPTIONS.N_g, 1:OPTIONS.N_t) =  best_solution.Pg;
+data.Pgc(OPTIONS.N_g+1:2*OPTIONS.N_g, 1:OPTIONS.N_t) =  best_solution.Pc;
+data.Pb(1:OPTIONS.N_e, 1:OPTIONS.N_t) =  best_solution.Pb;
+data.Ppr(OPTIONS.N_g+OPTIONS.N_e+1, 1:OPTIONS.N_t) =  best_solution.Ppr;
+data.load_shedding(1:2, 1:OPTIONS.N_t) =  best_solution.load_shedding;
+if operation_mode <= 3
+    data.Pl(1, 1:OPTIONS.N_t) = OPTIONS.P_L_TIME_off;
+    data.Pl(3, 1:OPTIONS.N_t) =  sum(best_solution.Pg) + sum(best_solution.Pb, 1) - best_solution.Ppr;
+elseif operation_mode <= 11
+    data.Pl(1, 1:OPTIONS.N_t) = OPTIONS.island1_load;
+    data.Pl(2, 1:OPTIONS.N_t) = OPTIONS.island2_load;
+    data.Pl(3, 1:OPTIONS.N_t) =  sum(best_solution.Pg) + sum(best_solution.Pb, 1) - best_solution.Ppr;
+end
 % data.power(10,:) = OPTIONS.P_L_TIME_off(1,1:OPTIONS.N_t);
 
 data.status(1:OPTIONS.N_g, 1:OPTIONS.N_t) = best_solution.delta_g;
@@ -481,10 +497,10 @@ end
 function [] = initial_parameters(parameter_test, operation_mode)
 global OPTIONS
 OPTIONS.velocity = [25 0];
-% number of ESM modules
-OPTIONS.N_e = 2;
-% number of generators
-OPTIONS.N_g = 2;
+% % number of ESM modules
+% OPTIONS.N_e = 4;
+% % number of generators
+% OPTIONS.N_g = 2;
 % number of time slots
 % OPTIONS.N_t = 12;
 % minmum time between startup and shuntdown
@@ -509,17 +525,38 @@ OPTIONS.Pg_Min(1,3) = 0.5;
 
 OPTIONS.Xi_E = 1;
 OPTIONS.Ppr_Max = (OPTIONS.velocity(1)).^3*2.2e-3;
-if operation_mode <= 7 
-    OPTIONS.Pb_Max(1) = 1;
-    OPTIONS.Pb_Min(1) = -1;
-    OPTIONS.E_Max = [3 1];
-    OPTIONS.E_Min = [0.2 0.2];
-elseif operation_mode <= 11
-    OPTIONS.Pb_Max(1) = 1;
-    OPTIONS.Pb_Min(1) = -1;
-    OPTIONS.E_Max = [3 1];
-    OPTIONS.E_Min = [0.2 0.2];
+% in the normal mode, there are two scenarios (4 ESMs in case 1, 3 ESMs in case 2)
+% if operation_mode <= 3
+if OPTIONS.N_e == 4
+    OPTIONS.Pb_Max(1) = 0.5;
+    OPTIONS.Pb_Min(1) = -0.5;
+    OPTIONS.E_Max = [1 1 1 1];
+    OPTIONS.E_Min = [0.2 0.2 0.2 0.2];
+    OPTIONS.E(1:OPTIONS.N_e,1) = 1 * ones(OPTIONS.N_e,1);
+    OPTIONS.E(1:OPTIONS.N_e,2) = 0.5 * ones(OPTIONS.N_e,1);
+%     OPTIONS.E(1:2,1:2) = [1 0.5; 1 0.5];
+elseif OPTIONS.N_e == 3
+    OPTIONS.Pb_Max(1) = 0.5;
+    OPTIONS.Pb_Min(1) = -0.5;
+    OPTIONS.E_Max = [1 1 1];
+    OPTIONS.E_Min = [0.2 0.2 0.2];
+    OPTIONS.E(1:OPTIONS.N_e,1) = 1 * ones(OPTIONS.N_e,1);
+    OPTIONS.E(1:OPTIONS.N_e,2) = 0.5 * ones(OPTIONS.N_e,1);
+%     OPTIONS.E(1:2,1:2) = [1 0.5; 1 0.5];
 end
+% % in the operation mode 4~7, 
+% elseif operation_mode <= 7 
+%     OPTIONS.Pb_Max(1) = 1;
+%     OPTIONS.Pb_Min(1) = -1;
+%     OPTIONS.E_Max = [3 1];
+%     OPTIONS.E_Min = [0.2 0.2];
+% elseif operation_mode <= 11
+%     OPTIONS.Pb_Max(1) = 1;
+%     OPTIONS.Pb_Min(1) = -1;
+%     OPTIONS.E_Max = [3 1];
+%     OPTIONS.E_Min = [0.2 0.2];
+% end
+% a_lc and c_lc
 
 
 % generator function parameters
@@ -537,8 +574,8 @@ switch parameter_test
     % Kanellos: OPMS in IEEE Transactions on Sustainable Energy, Electric power systems research, and Inventions     
     case 3 
         OPTIONS.G(1,1:3) = [5.4 61.5 390];
-        OPTIONS.G(3,1:3) = [13.1 12 430];
-        OPTIONS.G(2,1:3) = [5.4 63 400];
+        OPTIONS.G(2,1:3) = [13.1 12 430];
+        OPTIONS.G(3,1:3) = [5.4 63 400];
         OPTIONS.G(4,1:3) = [13.5 10 450];
         
     % Ce Shang: Economic and environmental generation and voyage scheduling of all electric ships in IEEE Transactions on Power Systems
@@ -585,9 +622,8 @@ switch parameter_test
         OPTIONS.M_sl = 80;
 end
 
-OPTIONS.E(1:2,1:2) = [1 0.5; 1 0.5];
 % OPTIONS.C_ss = [90; 45];
-OPTIONS.C_ss = [0; 0];
+OPTIONS.C_ss = 0 * ones(OPTIONS.N_g, 1);
 OPTIONS.R_G = OPTIONS.Pg_Max*0.75;
 % OPTIONS.R_G = [2 2];
 OPTIONS.error = 1e-3;
@@ -613,9 +649,9 @@ global OPTIONS infeasible_flag
 % cvx_begin
 % cvx_solver SeDuMi
 cvx_begin quiet
-    variable Ppr(1,OPTIONS.N_t) nonnegative
-    variable Pb(2,OPTIONS.N_t)
-    variable E(2,OPTIONS.N_t) nonnegative
+    variable Ppr(1, OPTIONS.N_t) nonnegative
+    variable Pb(OPTIONS.N_e, OPTIONS.N_t)
+    variable E(OPTIONS.N_e, OPTIONS.N_t) nonnegative
     variable Pg(OPTIONS.N_g, OPTIONS.N_t) nonnegative
     variable redundant_sw_s(2, OPTIONS.N_t)
     variable sub_delta_g(OPTIONS.N_g, OPTIONS.N_t)
@@ -665,32 +701,38 @@ cvx_begin quiet
         Ppr(1, 1:OPTIONS.N_t) <= OPTIONS.Ppr_Max * ones(1, OPTIONS.N_t)
 
         % ESM limitation
-        Pb(1, 1:OPTIONS.N_t) <= OPTIONS.Pb_Max * ones(1, OPTIONS.N_t)
-        Pb(1, 1:OPTIONS.N_t) >= OPTIONS.Pb_Min * ones(1, OPTIONS.N_t)
-        Pb(2, 1:OPTIONS.N_t) <= OPTIONS.Pb_Max * ones(1, OPTIONS.N_t)
-        Pb(2, 1:OPTIONS.N_t) >= OPTIONS.Pb_Min * ones(1, OPTIONS.N_t)
+        for index_e = 1:OPTIONS.N_e
+            Pb(index_e, 1:OPTIONS.N_t) <= OPTIONS.Pb_Max * ones(1, OPTIONS.N_t)
+            Pb(index_e, 1:OPTIONS.N_t) >= OPTIONS.Pb_Min * ones(1, OPTIONS.N_t)
+        end
+%         Pb(2, 1:OPTIONS.N_t) <= OPTIONS.Pb_Max * ones(1, OPTIONS.N_t)
+%         Pb(2, 1:OPTIONS.N_t) >= OPTIONS.Pb_Min * ones(1, OPTIONS.N_t)
 
         % charging and discharging
-        E(1, 1:OPTIONS.N_t) <= OPTIONS.E_Max(1) * ones(1, OPTIONS.N_t)
-        E(1, 1:OPTIONS.N_t) >= OPTIONS.E_Min(1) * ones(1, OPTIONS.N_t)
-        E(2, 1:OPTIONS.N_t) <= OPTIONS.E_Max(2) * ones(1, OPTIONS.N_t)
-        E(2, 1:OPTIONS.N_t) >= OPTIONS.E_Min(2) * ones(1, OPTIONS.N_t)
+        for index_e = 1:OPTIONS.N_e
+            E(index_e, 1:OPTIONS.N_t) <= OPTIONS.E_Max(1) * ones(1, OPTIONS.N_t)
+            E(index_e, 1:OPTIONS.N_t) >= OPTIONS.E_Min(1) * ones(1, OPTIONS.N_t)
+        end
+%         E(2, 1:OPTIONS.N_t) <= OPTIONS.E_Max(2) * ones(1, OPTIONS.N_t)
+%         E(2, 1:OPTIONS.N_t) >= OPTIONS.E_Min(2) * ones(1, OPTIONS.N_t)
 
         % ESM output power and the capacity constraints
         % When Pb is positive, ESM is in discharge status,
         % Thus, Pg + Pg is used in power balance comstraint. 
-        E(1, 1) == OPTIONS.E_Max(1) - Pb(1,1)
-        E(2, 1) == OPTIONS.E_Max(2) - Pb(2,1)
-        for t_index = 2:OPTIONS.N_t
-            E(1, t_index) == E(1, t_index-1) - Pb(1, t_index)
-            E(2, t_index) == E(2, t_index-1) - Pb(2, t_index)
+        for index_e = 1:OPTIONS.N_e
+            E(index_e, 1) == OPTIONS.E_Max(index_e) - Pb(index_e,1)
+%             E(2, 1) == OPTIONS.E_Max(2) - Pb(2,1)
+            for t_index = 2:OPTIONS.N_t
+                E(index_e, t_index) == E(index_e, t_index-1) - Pb(index_e, t_index)
+%                 E(2, t_index) == E(2, t_index-1) - Pb(2, t_index)
+            end
         end
 
         % voyage planning and ESS usage
         switch mod(operation_mode, 4)
             case 0  % only generator scheduling
                 Ppr(1, 1:OPTIONS.N_t) == OPTIONS.P_pr_avg;
-                Pb(1:2, 1:OPTIONS.N_t) == 0;
+                Pb(1:OPTIONS.N_e, 1:OPTIONS.N_t) == 0;
             case 1  % generator scheduling & ESMC
                 Ppr(1, 1:OPTIONS.N_t) == OPTIONS.P_pr_avg;
             case 2  % generator scheduling & ESMC & PPA
@@ -717,9 +759,9 @@ cvx_begin quiet
             % reconfiguration (only in mode 7)
             for t_index = 1:OPTIONS.N_t
                 redundant_sw_s(1:2, t_index).' * OPTIONS.Coupled_load(:, t_index) + OPTIONS.island1_load(1, t_index) ...
-                    - load_shedding(1, t_index) + Ppr(1, t_index) == (Pg(1, t_index)) + Pb(1, t_index) 
-                (ones(OPTIONS.N_g,1) - redundant_sw_s(1:2, t_index)).' * OPTIONS.Coupled_load(:, t_index) ...
-                    + OPTIONS.island2_load(1, t_index) - load_shedding(2, t_index) == (Pg(2, t_index)) + Pb(2, t_index)
+                    - load_shedding(1, t_index) + Ppr(1, t_index) == (Pg(1:OPTIONS.N_g-1, t_index)) + sum(Pb(1:OPTIONS.N_e-1, t_index)) 
+                (ones(OPTIONS.N_g,1) - redundant_sw_s(1:OPTIONS.N_g, t_index)).' * OPTIONS.Coupled_load(:, t_index) ...
+                    + OPTIONS.island2_load(1, t_index) - load_shedding(2, t_index) == (Pg(OPTIONS.N_g, t_index)) + Pb(2, t_index)
             end
             
             if operation_mode == 7
@@ -734,8 +776,8 @@ cvx_begin quiet
             % island fault mode operation with load shedding only in mode
             % 11
             for t_index = 1:OPTIONS.N_t
-                OPTIONS.island1_load(1, t_index) - load_shedding(1, t_index) + Ppr(1, t_index) == (Pg(1, t_index)) + Pb(1, t_index) 
-                OPTIONS.island2_load(1, t_index) - load_shedding(2, t_index) == (Pg(2, t_index)) + Pb(2, t_index)
+                OPTIONS.island1_load(1, t_index) - load_shedding(1, t_index) + Ppr(1, t_index) == (Pg(1:OPTIONS.N_g-1, t_index)) + sum(Pb(1:OPTIONS.N_e-1, t_index) )
+                OPTIONS.island2_load(1, t_index) - load_shedding(2, t_index) == (Pg(OPTIONS.N_g, t_index)) + Pb(OPTIONS.N_e, t_index)
             end
             
             if operation_mode ==11
