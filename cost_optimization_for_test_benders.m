@@ -1,6 +1,6 @@
 %% the main struture of benders decomposition algorithm
 function [cost_for_comparison, final_consumed_time, dual_gap, reduced_distance, infeasible_flag_out] ...
-         = cost_optimization_for_test_benders( time_slot, voya_distance, accelerate_flag_input, near_opt_optimal_input, operation_mode_input, No_test_in, para_LNBD)
+         = cost_optimization_for_test_benders( time_slot, voya_distance, accelerate_flag_input, near_opt_optimal_input, operation_mode_input, No_case_in, para_LNBD)
 global OPTIONS total_sub total_P total_dual accelerate_flag upper_of_lowerbound with_iteration_D infeasible_flag
 %% the adjusted parameters 
 dbstop if error
@@ -66,7 +66,7 @@ end
 % 10 (Fault w PPA w ESMC)
 % 11 (Fault w PPA w ESMC w load shedding & reconfiguration)
 if ~exist('operation_mode_input', 'var')
-    operation_mode = 3;
+    operation_mode = 11;
 else
     operation_mode = operation_mode_input;
 %     if operation_mode == 3
@@ -76,10 +76,10 @@ end
 
 
 % Test ID for saving results
-if ~exist('No_test_in', 'var')
-    No_test = 1;
+if ~exist('No_case_in', 'var')
+    No_case = 1;
 else
-    No_test = No_test_in;
+    No_case = No_case_in;
 end
 
 % Adjustment parameter of load range in LNBD
@@ -95,7 +95,7 @@ else
     with_iteration_D = para_LNBD(3);
 end
 
-case_numb = 1;
+case_numb = No_case;
 if (operation_mode <= 7) && (operation_mode >= 3)
     case_numb = 1;
 elseif (operation_mode <= 11) && (operation_mode >= 7)
@@ -273,8 +273,9 @@ for benders_index = 1:800
         disp('upperbound, lowerbound, error, dual_gap');
         disp([best_upperbound(benders_index) best_lowerbound(benders_index) error dual_gap]);
         
-        % convergence determination
-        if error <= 1e-3
+        % convergence determination: error is less than 1e-3 and the total
+        % consumed time is larger than 7200
+        if (error <= 1e-3) || (sum(consumed_time(3, 1:benders_index))> 7200)
             break;
         end
     end
@@ -297,14 +298,14 @@ best_solution.RD = RD(best_solution_index);
 optimal_cost = [best_lowerbound(1:benders_index); best_upperbound(1:benders_index); ];
 final_consumed_time(1, 1) = sum(consumed_time(3, 1:benders_index));
 final_consumed_time(1, 2) = benders_index;
-cost_for_comparison = save_optimal_cost_information(No_test, near_opt_optimal, optimal_cost, best_solution, operation_mode, consumed_time(:, 1:benders_index));
-% cost_for_comparison = save_optimal_cost_information(No_test, near_opt_optimal, optimal_cost, sub_P, delta_g, redundant_sw, reduced_distance, operation_mode, consumed_time(:, 1:benders_index));
+cost_for_comparison = save_optimal_cost_information(No_case, near_opt_optimal, optimal_cost, best_solution, operation_mode, consumed_time(:, 1:benders_index));
+% cost_for_comparison = save_optimal_cost_information(No_case, near_opt_optimal, optimal_cost, sub_P, delta_g, redundant_sw, reduced_distance, operation_mode, consumed_time(:, 1:benders_index));
 
 plot_result(optimal_cost);
 end
 
 %% Save optimal operation status
-function [cost_for_comparison] = save_optimal_cost_information(No_test, near_opt_optimal, optimal_cost, best_solution, operation_mode, consumed_time)
+function [cost_for_comparison] = save_optimal_cost_information(No_case, near_opt_optimal, optimal_cost, best_solution, operation_mode, consumed_time)
 global OPTIONS accelerate_flag
 operating_cost = OPTIONS.G(1:OPTIONS.N_g, 1).' * power(best_solution.Pg(1:OPTIONS.N_g, 1:OPTIONS.N_t), 2) ...
                + OPTIONS.G(1:OPTIONS.N_g, 2).' * best_solution.Pg(1:OPTIONS.N_g, 1:OPTIONS.N_t) ...
@@ -384,10 +385,10 @@ data.EEOI(1,  1:OPTIONS.N_t) = EEOI_t;
 
 if near_opt_optimal ==0
     filename = ['optimal_mode_',num2str(operation_mode),'_D.',num2str(OPTIONS.Distance),...
-                '_T.',num2str(OPTIONS.N_t),'_Ac.',num2str(accelerate_flag),'_No.',num2str(No_test),'.mat'];
+                '_T.',num2str(OPTIONS.N_t),'_Ac.',num2str(accelerate_flag),'_No.',num2str(No_case),'.mat'];
 elseif near_opt_optimal ==1
     filename = ['LNBD_mode_',num2str(operation_mode),'_D.',num2str(OPTIONS.Distance),'_varphi',num2str(OPTIONS.varphi_Pl),...
-                '_T.',num2str(OPTIONS.N_t),'_Ac.',num2str(accelerate_flag),'_No.',num2str(No_test),'.mat'];
+                '_T.',num2str(OPTIONS.N_t),'_Ac.',num2str(accelerate_flag),'_No.',num2str(No_case),'.mat'];
 end
 save(filename,'data');
 
@@ -770,7 +771,8 @@ cvx_begin quiet
         if operation_mode <= 3
             % normal operation without load shedding
             for t_index = 1:OPTIONS.N_t
-                 OPTIONS.P_L_TIME_off(1, t_index) - sum(load_shedding(1:2, t_index)) + Ppr(1, t_index) == sum( Pg(1:OPTIONS.N_g, t_index) ) + sum(Pb(1:OPTIONS.N_e, t_index) )
+                 OPTIONS.P_L_TIME_off(1, t_index) - sum(load_shedding(1:2, t_index)) + Ppr(1, t_index) == ...
+                     sum(Pg(1:OPTIONS.N_g, t_index), 1) + sum(Pb(1:OPTIONS.N_e, t_index), 1)
             end
             % load shedding range
             if operation_mode == 3
@@ -784,9 +786,9 @@ cvx_begin quiet
             % reconfiguration (only in mode 7)
             for t_index = 1:OPTIONS.N_t
                 redundant_sw_s(1:2, t_index).' * OPTIONS.Coupled_load(:, t_index) + OPTIONS.island1_load(1, t_index) ...
-                    - load_shedding(1, t_index) + Ppr(1, t_index) == sum(Pg(1, t_index), 1) + sum(Pb(1:OPTIONS.N_e-1, t_index)) 
+                    - load_shedding(1, t_index) + Ppr(1, t_index) == Pg(1, t_index) + sum(Pb(1:OPTIONS.N_e-1, t_index), 1) 
                 (ones(2,1) - redundant_sw_s(1:2, t_index)).' * OPTIONS.Coupled_load(:, t_index) ...
-                    + OPTIONS.island2_load(1, t_index) - load_shedding(2, t_index) == (Pg(2, t_index)) + Pb(OPTIONS.N_e, t_index)
+                    + OPTIONS.island2_load(1, t_index) - load_shedding(2, t_index) == Pg(2, t_index) + Pb(OPTIONS.N_e, t_index)
             end
             
             if operation_mode == 7
@@ -801,8 +803,8 @@ cvx_begin quiet
             % island fault mode operation with load shedding only in mode
             % 11
             for t_index = 1:OPTIONS.N_t
-                OPTIONS.island1_load(1, t_index) - load_shedding(1, t_index) + Ppr(1, t_index) == (Pg(1:OPTIONS.N_g-1, t_index)) + sum(Pb(1:OPTIONS.N_e-1, t_index) )
-                OPTIONS.island2_load(1, t_index) - load_shedding(2, t_index) == (Pg(OPTIONS.N_g, t_index)) + Pb(OPTIONS.N_e, t_index)
+                OPTIONS.island1_load(1, t_index) - load_shedding(1, t_index) + Ppr(1, t_index) == sum(Pg(1:OPTIONS.N_g-1, t_index), 1) + sum(Pb(1:OPTIONS.N_e-1, t_index), 1)
+                OPTIONS.island2_load(1, t_index) - load_shedding(2, t_index) == Pg(OPTIONS.N_g, t_index) + Pb(OPTIONS.N_e, t_index)
             end
             
             if operation_mode ==11
@@ -1019,19 +1021,18 @@ cvx_begin quiet
                 % speedup constraints: power range & lower bound
                 if operation_mode <=3 % normal mode
 %                     master_delta_g(1, 1:OPTIONS.N_t)*OPTIONS.Pg_Max(1) + master_delta_g(2, 1:OPTIONS.N_t)*OPTIONS.Pg_Max(2) ...
-                    OPTIONS.Pg_Max(1, 1:OPTIONS.N_g)*master_delta_g(1:OPTIONS.N_g, 1:OPTIONS.N_t) ...
-                        +  OPTIONS.Pb_Max * ones(1, OPTIONS.N_t) >= OPTIONS.P_L_TIME_off + Ppr_best_solution
 %                             +  OPTIONS.Pb_Max * ones(1, OPTIONS.N_t) >= OPTIONS.P_L_TIME_off + total_P(Max_benders_iteration).Ppr
+                    OPTIONS.Pg_Max(1, 1:OPTIONS.N_g) * master_delta_g(1:OPTIONS.N_g, 1:OPTIONS.N_t) ...
+                        +  3*OPTIONS.Pb_Max * ones(1, OPTIONS.N_t) >= OPTIONS.P_L_TIME_off + Ppr_best_solution
                         
-%                     master_delta_g(1, 1:OPTIONS.N_t)*OPTIONS.Pg_Min(1) + master_delta_g(2, 1:OPTIONS.N_t)*OPTIONS.Pg_Min(2) ...
-                    OPTIONS.Pg_Min(1, 1:OPTIONS.N_g)*master_delta_g(1:OPTIONS.N_g, 1:OPTIONS.N_t) ...
-                        +  OPTIONS.Pb_Min * ones(1, OPTIONS.N_t) <= OPTIONS.P_total_vs + 0 % Ppr
+                    OPTIONS.Pg_Min(1, 1:OPTIONS.N_g) * master_delta_g(1:OPTIONS.N_g, 1:OPTIONS.N_t) ...
+                        +  3*OPTIONS.Pb_Min * ones(1, OPTIONS.N_t) <= OPTIONS.P_total_vs + 0 % Ppr
                 elseif operation_mode <= 7 % semi-island fault mode
                     if Max_benders_iteration >= 1
-                        master_delta_g(1, 1:OPTIONS.N_t)*OPTIONS.Pg_Max(1) + OPTIONS.Pb_Max * ones(1, OPTIONS.N_t) ...
+                        master_delta_g(1, 1:OPTIONS.N_t)*OPTIONS.Pg_Max(1) + 3*OPTIONS.Pb_Max * ones(1, OPTIONS.N_t) ...
                             >= OPTIONS.island1_max + Ppr_best_solution
 %                             >= OPTIONS.island1_max + total_P(Max_benders_iteration).Ppr
-                        master_delta_g(1, 1:OPTIONS.N_t)*OPTIONS.Pg_Min(1) + OPTIONS.Pb_Min * ones(1, OPTIONS.N_t) <= OPTIONS.island1_min + 0 % Ppr
+                        master_delta_g(1, 1:OPTIONS.N_t)*OPTIONS.Pg_Min(1) + 3*OPTIONS.Pb_Min * ones(1, OPTIONS.N_t) <= OPTIONS.island1_min + 0 % Ppr
                         master_delta_g(2, 1:OPTIONS.N_t)*OPTIONS.Pg_Max(2) + OPTIONS.Pb_Max * ones(1, OPTIONS.N_t) >= OPTIONS.island2_max
                         master_delta_g(2, 1:OPTIONS.N_t)*OPTIONS.Pg_Min(2) + OPTIONS.Pb_Min * ones(1, OPTIONS.N_t) <= OPTIONS.island2_min + 0 % Ppr
                     end
@@ -1040,10 +1041,11 @@ cvx_begin quiet
                 elseif operation_mode <= 11 % island fault mode
                     if Max_benders_iteration >= 1
 %                         master_delta_g(1, 1:OPTIONS.N_t)*OPTIONS.Pg_Max(1) + OPTIONS.Pb_Max * ones(1, OPTIONS.N_t) ...
-                        OPTIONS.Pg_Max(1, 1:2)*master_delta_g(1:2, 1:OPTIONS.N_t) >= OPTIONS.island1_max + Ppr_best_solution
 %                             >= OPTIONS.island1_max + total_P(Max_benders_iteration).Ppr
-                        OPTIONS.Pg_Min(1, 1:2)*master_delta_g(1:2, 1:OPTIONS.N_t) <= OPTIONS.island1_min
 %                         master_delta_g(1, 1:OPTIONS.N_t)*OPTIONS.Pg_Min(1) + OPTIONS.Pb_Min * ones(1, OPTIONS.N_t) <= OPTIONS.island1_min + 0 % Ppr
+                        OPTIONS.Pg_Max(1, 1:2)*master_delta_g(1:2, 1:OPTIONS.N_t) + 2*OPTIONS.Pb_Max * ones(1, OPTIONS.N_t) ...
+                            >= OPTIONS.island1_max + Ppr_best_solution
+                        OPTIONS.Pg_Min(1, 1:2)*master_delta_g(1:2, 1:OPTIONS.N_t) + 2*OPTIONS.Pb_Min * ones(1, OPTIONS.N_t) <= OPTIONS.island1_min
                         master_delta_g(3, 1:OPTIONS.N_t)*OPTIONS.Pg_Max(3) + OPTIONS.Pb_Max * ones(1, OPTIONS.N_t) >= OPTIONS.island2_max
                         master_delta_g(3, 1:OPTIONS.N_t)*OPTIONS.Pg_Min(3) + OPTIONS.Pb_Min * ones(1, OPTIONS.N_t) <= OPTIONS.island2_min + 0 % Ppr
                     end
@@ -1052,27 +1054,8 @@ cvx_begin quiet
                 end
                 
                 % speedup constraint: lower bound
-%                 benders_cut >= benders_cut_lowerbound
             case 3
-                % speedup constraints: power range
-                if operation_mode <=3 % normal mode
-                    master_delta_g(1, 1:OPTIONS.N_t)*OPTIONS.Pg_Max(1) + master_delta_g(2, 1:OPTIONS.N_t)*OPTIONS.Pg_Max(2) ...
-                        +  OPTIONS.Pb_Max * ones(1, OPTIONS.N_t) >= OPTIONS.P_L_TIME_off + Ppr_best_solution
-%                         +  OPTIONS.Pb_Max * ones(1, OPTIONS.N_t) >= OPTIONS.P_L_TIME_off + total_P(Max_benders_iteration).Ppr
-
-                    master_delta_g(1, 1:OPTIONS.N_t)*OPTIONS.Pg_Min(1) + master_delta_g(2, 1:OPTIONS.N_t)*OPTIONS.Pg_Min(2) ...
-                        +  OPTIONS.Pb_Min * ones(1, OPTIONS.N_t) <= OPTIONS.P_total_vs + 0 % Ppr
-                elseif operation_mode <= 7 % fault mode
-                    if Max_benders_iteration >= 1
-                        master_delta_g(1, 1:OPTIONS.N_t)*OPTIONS.Pg_Max(1) + OPTIONS.Pb_Max * ones(1, OPTIONS.N_t) ...
-                            >= OPTIONS.island1_max + Ppr_best_solution
-%                             >= OPTIONS.island1_max + total_P(Max_benders_iteration).Ppr
-                        
-                        master_delta_g(1, 1:OPTIONS.N_t)*OPTIONS.Pg_Min(1) + OPTIONS.Pb_Min * ones(1, OPTIONS.N_t) <= OPTIONS.island1_min + 0 % Ppr
-                        master_delta_g(2, 1:OPTIONS.N_t)*OPTIONS.Pg_Max(2) + OPTIONS.Pb_Max * ones(1, OPTIONS.N_t) >= OPTIONS.island2_max
-                        master_delta_g(2, 1:OPTIONS.N_t)*OPTIONS.Pg_Min(2) + OPTIONS.Pb_Min * ones(1, OPTIONS.N_t) <= OPTIONS.island2_min + 0 % Ppr
-                    end
-                end
+%                 benders_cut >= benders_cut_lowerbound
             case 4
                 % speedup constraint: lower bound
                 benders_cut >= benders_cut_lowerbound
