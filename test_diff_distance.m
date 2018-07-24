@@ -1,46 +1,64 @@
 time_slot = [6 12 24];
 % voya_distance = [70 150 300 ];
 
-% finished 1th performance analysis: different distance for testing load shedding and reduced distances
-case_numb = 2;
-% No_test = 2;
-complete_accelerate = 2;
-range_accelerate = 1;
-varphi = linspace(0.0, 1.0, 11);
-if 1 == case_numb
-    voya_distance_test = linspace(120, 200, 5);
-elseif 2 == case_numb
-    voya_distance_test = linspace(160, 240, 5);
+for index_case = 1:2
+    % finished 1th performance analysis: different distance for testing load shedding and reduced distances
+    case_numb = index_case;
+    % No_test = 2;
+    complete_accelerate = 2;
+    range_accelerate = 1;
+    varphi = linspace(0.0, 1.0, 11);
+    if 1 == case_numb
+        voya_distance_test = linspace(100, 200, 6);
+        mode_with_all_methods_fault = 7;
+        time_slot = 10;
+    elseif 2 == case_numb
+        voya_distance_test = linspace(160, 240, 5);
+        mode_with_all_methods_fault = 7;
+        time_slot = 12;
+    elseif 3 == case_numb
+        voya_distance_test = linspace(100, 200, 6);
+        mode_with_all_methods_fault = 7;
+        time_slot = 10;
+    elseif 4 == case_numb
+        voya_distance_test = linspace(160, 240, 5);
+        mode_with_all_methods_fault = 11;
+        time_slot = 12;
+    end
+    No_distance = length(voya_distance_test);
+
+    % operation_mode_input
+    % 0~3 normal mode; 4~7 fault mode
+    % maxi_time_slot = 2;
+    % optimal algorithm: 0;
+    % LNBD: 1;
+    optimal_alg = 1;
+    if 1 == optimal_alg
+        complete_accelerate = 1;
+    end
+    % only_operation_cost = zeros(maxi_time_slot, length(varphi)+1);
+
+    for index_distance = 3:1:No_distance
+    %         if index_mode == 1||index_mode == 5
+    %             figure
+    %         end
+
+    %     [optimal_cost, final_consumed_time, dual_gap, reduced_distance] ...
+    %         = cost_optimization_for_test_benders_3G(time_slot(2), 150, complete_accelerate, optimal_alg, 11, No_test);
+
+        [optimal_cost, final_consumed_time, dual_gap, reduced_distance] ...
+            = cost_optimization_for_test_benders(time_slot, voya_distance_test(index_distance), complete_accelerate, optimal_alg, mode_with_all_methods_fault, case_numb);
+
+        comparison_diff_distance(index_distance, 1:4) = optimal_cost;
+        comparison_diff_distance(index_distance, 5:6) = final_consumed_time;
+        comparison_diff_distance(index_distance, 7) = dual_gap;
+        comparison_diff_distance(index_distance, 8) = reduced_distance;
+    end
+
+    filename = ['comparison_diff_distance_Alg.',num2str(optimal_alg),'_Mode.',num2str(mode_with_all_methods_fault),'_Case.',num2str(case_numb),'.mat'];
+    save(filename,'comparison_diff_distance');
+    clear comparison_diff_distance
 end
-No_distance = length(voya_distance_test);
-
-% operation_mode_input
-% 0~3 normal mode; 4~7 fault mode
-mode_with_all_methods_fault = 11;
-maxi_time_slot = 2;
-optimal_alg = 0;
-LNBD = 1;
-only_operation_cost = zeros(maxi_time_slot, length(varphi)+1);
-
-for index_distance = 1:1:No_distance
-%         if index_mode == 1||index_mode == 5
-%             figure
-%         end
-
-%     [optimal_cost, final_consumed_time, dual_gap, reduced_distance] ...
-%         = cost_optimization_for_test_benders_3G(time_slot(2), 150, complete_accelerate, optimal_alg, 11, No_test);
-    
-    [optimal_cost, final_consumed_time, dual_gap, reduced_distance] ...
-        = cost_optimization_for_test_benders(time_slot(2), voya_distance_test(index_distance), complete_accelerate, optimal_alg, mode_with_all_methods_fault, case_numb);
-
-    comparison_diff_distance(index_distance, 1:4) = optimal_cost;
-    comparison_diff_distance(index_distance, 5:6) = final_consumed_time;
-    comparison_diff_distance(index_distance, 7) = dual_gap;
-    comparison_diff_distance(index_distance, 8) = reduced_distance;
-end
-
-filename = ['comparison_diff_distance_Mode.',num2str(mode_with_all_methods_fault),'.mat'];
-save(filename,'comparison_diff_distance');
 
 % %% 2nd performance analysis: different varphi
 % No_test = 2;
