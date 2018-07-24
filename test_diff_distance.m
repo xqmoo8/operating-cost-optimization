@@ -55,8 +55,10 @@ for index_case = 1:2
         comparison_diff_distance(index_distance, 8) = reduced_distance;
     end
 
-    filename = ['comparison_diff_distance_Alg.',num2str(optimal_alg),'_Mode.',num2str(mode_with_all_methods_fault),'_Case.',num2str(case_numb),'.mat'];
-    save(filename,'comparison_diff_distance');
+    filename = ['comparison_diff_distance_Alg_',num2str(optimal_alg),'_Mode_',num2str(mode_with_all_methods_fault),'_Case_',num2str(case_numb)];
+    save_file_string = ['comparison_diff_distance_Alg_' num2str(optimal_alg) '_Mode_' num2str(mode_with_all_methods_fault) '_Case_' num2str(case_numb) '=comparison_diff_distance'];
+    eval(save_file_string);
+    save(filename, filename);
     clear comparison_diff_distance
 end
 
