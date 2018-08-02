@@ -1,10 +1,10 @@
-time_slot = 10;
-voya_distance = 160;
+time_slot = 12;
+voya_distance = 220;
 optimal = 0;
 LNBD = 1; % Low-complexity near-optimal algorithm
 
 % finished 1th performance analysis: different distance for testing load shedding and reduced distances
-No_test = 0;
+No_test = 2;
 full_accelerate = 2;
 accelerate = 1;
 varphi_Pl = linspace(0.0, 1.0, 11);
@@ -12,7 +12,7 @@ varphi_Ppr = linspace(0.0, 1.0, 11);
 
 % operation_mode_input
 % 0~3 normal mode; 4~7 fault mode
-fault_all_methods = 7;
+fault_all_methods = 3;
 maxi_time_slot = 2;
 index_iteration_D = 0;
 
@@ -20,7 +20,7 @@ index_iteration_D = 0;
 
 total_results = zeros(122,11);
 % the 4-th is not important.
-for index_mode = 7:1:7
+for index_mode = 10:1:10
 %     for index_iteration_D = 0:0
     if index_mode == 5
         continue;
