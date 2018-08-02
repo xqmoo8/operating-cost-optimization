@@ -14,7 +14,7 @@ end
 
 % The voyage distance
 if ~exist('voya_distance', 'var')
-    OPTIONS.Distance = 140;
+    OPTIONS.Distance = 160;
 else
     OPTIONS.Distance = voya_distance;
 end
@@ -102,7 +102,7 @@ elseif (operation_mode <= 11) && (operation_mode > 7)
     case_numb = 2;
 end
 
-% number of ESM modules
+% the number of generators and ESM modules in the Cases.
 if case_numb == 1
     OPTIONS.N_g = 2;
     OPTIONS.N_e = 4;
@@ -354,6 +354,7 @@ total_switching = sum(abs(best_solution.redundant_sw(1,1) - OPTIONS.initial_redu
                 + sum(abs(best_solution.redundant_sw(1,2:OPTIONS.N_t) - best_solution.redundant_sw(1,1:OPTIONS.N_t-1)) ) ...
                 + sum(abs(best_solution.redundant_sw(2,2:OPTIONS.N_t) - best_solution.redundant_sw(2,1:OPTIONS.N_t-1)));
 
+% the final power schedule of SPS
 data.Pgc(1:OPTIONS.N_g, 1:OPTIONS.N_t) =  best_solution.Pg;
 data.Pgc(OPTIONS.N_g+1:2*OPTIONS.N_g, 1:OPTIONS.N_t) =  best_solution.Pc;
 data.Pb(1:OPTIONS.N_e, 1:OPTIONS.N_t) =  best_solution.Pb;
@@ -408,11 +409,11 @@ end
 data.EEOI(1,  1:OPTIONS.N_t) = EEOI_t;
 
 if near_opt_optimal ==0
-    filename = ['optimal_mode_',num2str(operation_mode),'_D.',num2str(OPTIONS.Distance),...
-                '_T.',num2str(OPTIONS.N_t),'_Ac.',num2str(accelerate_flag),'_No.',num2str(No_case),'.mat'];
+    filename = ['optimal_mode_',num2str(operation_mode),'_D_',num2str(OPTIONS.Distance),...
+                '_T_',num2str(OPTIONS.N_t),'_Ac_',num2str(accelerate_flag),'_No_',num2str(No_case),'.mat'];
 elseif near_opt_optimal ==1
-    filename = ['LNBD_mode_',num2str(operation_mode),'_D.',num2str(OPTIONS.Distance),'_varphi',num2str(OPTIONS.varphi_Pl),...
-                '_T.',num2str(OPTIONS.N_t),'_Ac.',num2str(accelerate_flag),'_No.',num2str(No_case),'.mat'];
+    filename = ['LNBD_mode_',num2str(operation_mode),'_D_',num2str(OPTIONS.Distance),'_varphi_',num2str(OPTIONS.varphi_Pl),...
+                '_T_',num2str(OPTIONS.N_t),'_Ac_',num2str(accelerate_flag),'_No_',num2str(No_case),'.mat'];
 end
 save(filename,'data');
 
@@ -667,9 +668,9 @@ P_G_max = max(OPTIONS.Pg_Max);
 
 MIN_PRECISE = 0.01;
 
-OPTIONS.Penalty_L = max(2*A_max*P_G_max + B_max, 2*OPTIONS.Xi_E*OPTIONS.E(1,1)*OPTIONS.Pb_Max);
+OPTIONS.Penalty_L = max(2*A_max*P_G_max + B_max, max(2*OPTIONS.Xi_E*OPTIONS.E(1,1)*OPTIONS.Pb_Max));
 OPTIONS.Penalty_D = 3*(2.2e-3)^(1/3)*OPTIONS.Penalty_L/(OPTIONS.Ppr_Max)^(1/3-1);
-OPTIONS.Penalty_xi = max(2*A_max*P_G_max + B_max + (Css_max*(OPTIONS.N_t-1))/MIN_PRECISE, 2*OPTIONS.Xi_E*OPTIONS.E(1,1)*OPTIONS.Pb_Max + OPTIONS.E(1,2)/MIN_PRECISE);
+OPTIONS.Penalty_xi = max(2*A_max*P_G_max + B_max + (Css_max*(OPTIONS.N_t-1))/MIN_PRECISE, max(2*OPTIONS.Xi_E*OPTIONS.E(1,1)*OPTIONS.Pb_Max + OPTIONS.E(1,2)/MIN_PRECISE));
 
 % OPTIONS.varphi = 2/3;
 end
@@ -1150,7 +1151,7 @@ elseif OPTIONS.N_e == 3
     if operation_mode <= 3
         p_ESM_avg = (sum(OPTIONS.E_Max, 2) - sum(OPTIONS.E_Min, 2))/OPTIONS.N_t;
     elseif operation_mode <= 11
-        p_ESM_avg(1, 1) = (OPTIONS.E_Max(1, 1:2) - OPTIONS.E_Min(1, 1:2))/OPTIONS.N_t;
+        p_ESM_avg(1, 1) = sum(OPTIONS.E_Max(1, 1:2) - OPTIONS.E_Min(1, 1:2), 2)/OPTIONS.N_t;
         p_ESM_avg(2, 1) = (OPTIONS.E_Max(3) - OPTIONS.E_Min(3))/OPTIONS.N_t;
     end
 end
@@ -1158,6 +1159,8 @@ end
 % update the rest parameters: rest distance, rest average ppr, and the
 % power deviation of load at next time slot.
 temp_T_D_d = OPTIONS.Distance;
+best_sub_optval_on = inf;
+best_sub_optval_t = zeros(1, OPTIONS.N_t);
 for index_loop = 1:10
     sub_optval_on = 0;
     for index_time = 1:OPTIONS.N_t
@@ -1389,6 +1392,7 @@ for index_loop = 1:10
             if index_time == OPTIONS.N_t
                 Rest_Distance = sum(D_d);
             end
+            
         elseif with_iteration_D == 1
             Rest_Distance =  Rest_Distance - Distance_slot_obj + reduced_distance_on;
             if index_time < OPTIONS.N_t
@@ -1409,7 +1413,7 @@ for index_loop = 1:10
             end
         elseif with_iteration_D == 2
         end
-
+        
         dual_Sp(1:2, index_time) = temp_dual_Sp;
         dual_Ss(1:2, index_time) = temp_dual_Ss;
         dual_delta_g1(1, index_time) = temp_dual_delta_g1;
@@ -1419,6 +1423,29 @@ for index_loop = 1:10
         end
             
     end
+    
+    if sub_optval_on < best_sub_optval_on
+        best_sub_optval_on = sub_optval_on;
+        best_sub_optval_t = sub_optval_t;
+        sub_P.Pg = Pg;
+        sub_P.Pb = Pb;
+        sub_P.Pc = Pc;
+        sub_P.Pd = Pd;
+        sub_P.Ppr = Ppr;
+        sub_P.load_shedding = load_shedding;
+
+        sub_dual.switch(1:2, 1:OPTIONS.N_t) = dual_Sp;
+        sub_dual.switch(3:4, 1:OPTIONS.N_t) = dual_Ss;
+        sub_dual.delta_g(1, 1:OPTIONS.N_t) = dual_delta_g1;
+        sub_dual.delta_g(2, 1:OPTIONS.N_t) = dual_delta_g2;
+        if 3 == OPTIONS.N_g
+            sub_dual.delta_g(3, 1:OPTIONS.N_t) = dual_delta_g3;
+        end
+        
+        reduced_distance = Rest_Distance;
+        disp(index_loop);
+    end
+    
     % If it exists any (D_d(t) > 0.01 and D_d(t) <= 0.01), average the D(t) to reduce the D_d.)
     % In addition, if the reduced D_d approximately equals to zero, there
     % is not optimization space for D_d. T
@@ -1430,34 +1457,19 @@ for index_loop = 1:10
         break;
     end
     temp_T_D_d = sum(D_d);
+    
     if infeasible_flag == 1
         break;
     end
 end
 
-reduced_distance = Rest_Distance;
 sub_delta_g(1:OPTIONS.N_g, 1:OPTIONS.N_t) = delta_g(1:OPTIONS.N_g, 1:OPTIONS.N_t);
-sub_optval(1, 1) = sub_optval_on;
-sub_optval(2, :) = sub_optval_t;
+sub_optval(1, 1) = best_sub_optval_on;
+sub_optval(2, 1:OPTIONS.N_t+1) = best_sub_optval_t;
 
 %% startup cost: first startup cost and other startup cost
 one_item_cost = sum(OPTIONS.G(1:OPTIONS.N_g, 3).' * sub_delta_g(1:OPTIONS.N_g, 1:OPTIONS.N_t) ,2) ;
 objval_upperbound = sub_optval_on + one_item_cost;
-
-sub_P.Pg = Pg;
-sub_P.Pb = Pb;
-sub_P.Pc = Pc;
-sub_P.Pd = Pd;
-sub_P.Ppr = Ppr;
-sub_P.load_shedding = load_shedding;
-
-sub_dual.switch(1:2, 1:OPTIONS.N_t) = dual_Sp;
-sub_dual.switch(3:4, 1:OPTIONS.N_t) = dual_Ss;
-sub_dual.delta_g(1, 1:OPTIONS.N_t) = dual_delta_g1;
-sub_dual.delta_g(2, 1:OPTIONS.N_t) = dual_delta_g2;
-if 3 == OPTIONS.N_g
-    sub_dual.delta_g(3, 1:OPTIONS.N_t) = dual_delta_g3;
-end
 
 if abs(objval_upperbound - 18085) < 10
     disp(objval_upperbound);
@@ -1484,7 +1496,7 @@ global OPTIONS
             if OPTIONS.Delta_PL(index_time) >= 0
                 upper_bound_ESM_P = roundn(min(p_ESM_avg + sub_varphi_Pl * OPTIONS.Delta_PL(index_time), rest_pmax_ESM), -2);
             else
-                upper_bound_ESM_P = roundn(max(p_ESM_avg + sub_varphi_Pl * OPTIONS.Delta_PL(index_time), rest_pmin_ESM), -2);
+                upper_bound_ESM_P = ceil(max(p_ESM_avg + sub_varphi_Pl * OPTIONS.Delta_PL(index_time), rest_pmin_ESM)*100)/100;
             end
         else
             upper_bound_ESM_P = sum(OPTIONS.E_Max) - sum(OPTIONS.E_Min);
@@ -1498,15 +1510,59 @@ global OPTIONS
         % Maximum charge and discharge power of ESM in different islands
         % The initial capacity of ESM is the maximum value (OPTIONS.E_Max)
         if index_time == 1
-            rest_pmax_ESM1 = OPTIONS.E_Max(1) - OPTIONS.E_Min(1);
-            rest_pmax_ESM2 = OPTIONS.E_Max(2) - OPTIONS.E_Min(2);
-            rest_pmin_ESM1 = OPTIONS.E_Max(1) - OPTIONS.E_Max(1);
-            rest_pmin_ESM2 = OPTIONS.E_Max(2) - OPTIONS.E_Max(2);
+            rest_pmax_ESM1 = sum(OPTIONS.E_Max(1:OPTIONS.N_e-1) - OPTIONS.E_Min(1:OPTIONS.N_e-1), 2);
+            rest_pmax_ESM2 = OPTIONS.E_Max(OPTIONS.N_e) - OPTIONS.E_Min(OPTIONS.N_e);
+            rest_pmin_ESM1 = sum(OPTIONS.E_Max(1:OPTIONS.N_e-1) - OPTIONS.E_Max(1:OPTIONS.N_e-1), 2);
+            rest_pmin_ESM2 = OPTIONS.E_Max(OPTIONS.N_e) - OPTIONS.E_Max(OPTIONS.N_e);
         else
-            rest_pmax_ESM1 = E_last_time(1, 1) - OPTIONS.E_Min(1);
-            rest_pmax_ESM2 = E_last_time(2, 1) - OPTIONS.E_Min(2);
-            rest_pmin_ESM1 = E_last_time(1, 1) - OPTIONS.E_Max(1);
-            rest_pmin_ESM2 = E_last_time(2, 1) - OPTIONS.E_Max(2);
+            rest_pmax_ESM1 = sum(E_last_time(1:OPTIONS.N_e-1, 1).' - OPTIONS.E_Min(1:OPTIONS.N_e-1), 2);
+            rest_pmax_ESM2 = E_last_time(OPTIONS.N_e, 1) - OPTIONS.E_Min(OPTIONS.N_e);
+            rest_pmin_ESM1 = sum(E_last_time(1:OPTIONS.N_e-1, 1).' - OPTIONS.E_Max(1:OPTIONS.N_e-1), 2);
+            rest_pmin_ESM2 = E_last_time(OPTIONS.N_e, 1) - OPTIONS.E_Max(OPTIONS.N_e);
+        end
+        % charge and discharge bound in island 1
+        if sum(delta_g(1,index_time))>=1
+            if OPTIONS.Delta_PL_island1(index_time) >= 0
+                upper_bound_ESM1P = roundn(min(p_ESM_avg(1, 1) + ...
+                    sub_varphi_Pl * OPTIONS.Delta_PL_island1(index_time), rest_pmax_ESM1), -2);
+            else
+                upper_bound_ESM1P = roundn(max(p_ESM_avg(1, 1) + ...
+                    sub_varphi_Pl * OPTIONS.Delta_PL_island1(index_time), rest_pmin_ESM1), -2);
+            end
+        else
+            upper_bound_ESM1P = OPTIONS.E_Max(1) - OPTIONS.E_Min(1);
+        end
+        % charge and discharge bound in i
+        if sum(delta_g(2,index_time))>=1
+            if OPTIONS.Delta_PL_island2(index_time) >= 0
+                upper_bound_ESM2P = roundn(min(p_ESM_avg(2, 1) + ...
+                    sub_varphi_Pl * OPTIONS.Delta_PL_island2(index_time), rest_pmax_ESM2), -2);
+            else
+                upper_bound_ESM2P = roundn(max(p_ESM_avg(2, 1) + ...
+                    sub_varphi_Pl * OPTIONS.Delta_PL_island2(index_time), rest_pmin_ESM2), -2);
+            end
+        else
+            upper_bound_ESM2P = OPTIONS.E_Max(2) - OPTIONS.E_Min(2);
+        end
+        upper_bound_Pb(1) = upper_bound_ESM1P;
+        upper_bound_Pb(2) = upper_bound_ESM2P;
+    elseif operation_mode <= 11
+        % propulsion power modules locate in island part 1, 
+        % power adjustment only uses OPTIONS.Delta_PL_island1
+        Distance_slot_obj = ((Rest_ppr_avg - sub_varphi_Ppr * OPTIONS.Delta_PL_island1(index_time) )/2.2e-3 )^(1/3);
+        
+        % Maximum charge and discharge power of ESM in different islands
+        % The initial capacity of ESM is the maximum value (OPTIONS.E_Max)
+        if index_time == 1
+            rest_pmax_ESM1 = sum(OPTIONS.E_Max(1:OPTIONS.N_e-1) - OPTIONS.E_Min(1:OPTIONS.N_e-1), 2);
+            rest_pmax_ESM2 = OPTIONS.E_Max(OPTIONS.N_e) - OPTIONS.E_Min(OPTIONS.N_e);
+            rest_pmin_ESM1 = sum(OPTIONS.E_Max(1:OPTIONS.N_e-1) - OPTIONS.E_Max(1:OPTIONS.N_e-1), 2);
+            rest_pmin_ESM2 = OPTIONS.E_Max(OPTIONS.N_e) - OPTIONS.E_Max(OPTIONS.N_e);
+        else
+            rest_pmax_ESM1 = sum(E_last_time(1:OPTIONS.N_e-1, 1).' - OPTIONS.E_Min(1:OPTIONS.N_e-1), 2);
+            rest_pmax_ESM2 = E_last_time(OPTIONS.N_e, 1) - OPTIONS.E_Min(OPTIONS.N_e);
+            rest_pmin_ESM1 = sum(E_last_time(1:OPTIONS.N_e-1, 1).' - OPTIONS.E_Max(1:OPTIONS.N_e-1), 2);
+            rest_pmin_ESM2 = E_last_time(OPTIONS.N_e, 1) - OPTIONS.E_Max(OPTIONS.N_e);
         end
         % charge and discharge bound in island 1
         if sum(delta_g(1,index_time))>=1
@@ -1658,28 +1714,6 @@ for index_time  = 1:OPTIONS.N_t
                             delta_g_on(2, 1)*OPTIONS.Pg_Min(2) + OPTIONS.Pb_Min <= OPTIONS.island2_min(index_time) + 0; % Ppr
                         end
                     end
-                    % speedup constraint: lower bound
-%                     benders_cut >= benders_cut_lowerbound;
-                case 3
-                    % speedup constraints: power range
-                    if operation_mode <=3 % normal mode
-                        delta_g_on(1, 1)*OPTIONS.Pg_Max(1) + delta_g_on(2, 1)*OPTIONS.Pg_Max(2) ...
-                            +  OPTIONS.Pb_Max >= OPTIONS.P_L_TIME_off(index_time) + total_P(Max_benders_iteration).Ppr(index_time);
-                        delta_g_on(1, 1)*OPTIONS.Pg_Min(1) + delta_g_on(2, 1)*OPTIONS.Pg_Min(2) ...
-                            +  OPTIONS.Pb_Min <= OPTIONS.P_total_vs(index_time) + 0; % Ppr
-                    elseif operation_mode <= 7 % fault mode
-                        if Max_benders_iteration >= 1
-                            delta_g_on(1, 1)*OPTIONS.Pg_Max(1) + OPTIONS.Pb_Max ...
-                                >= OPTIONS.island1_max + total_P(Max_benders_iteration).Ppr;
-                            delta_g_on(1, 1)*OPTIONS.Pg_Min(1) + OPTIONS.Pb_Min <= OPTIONS.island1_min(index_time) + 0; % Ppr
-                            delta_g_on(2, 1)*OPTIONS.Pg_Max(2) + OPTIONS.Pb_Max >= OPTIONS.island2_max(index_time);
-                            delta_g_on(2, 1)*OPTIONS.Pg_Min(2) + OPTIONS.Pb_Min <= OPTIONS.island2_min(index_time) + 0; % Ppr
-                        end
-                    end
-                case 4
-                    % speedup constraint: lower bound
-                    benders_cut >= benders_cut_lowerbound;
-    %             otherwise % non-constriant
             end
 
     cvx_end
@@ -1704,4 +1738,6 @@ if strcmp(cvx_status, 'Failed')
     disp('Master-t Failed');
     infeasible_flag = 6;
 end
+
+% disp(master_delta_g);
 end
