@@ -7,5 +7,5 @@ allocation of ESMs and propulsion modules in the subproblem. A complexity analys
 
 <!-- This work is used for optimizing the operating cost of MVDC shipboard power system. Especially, it can solve the problem in normal and failure mode. -->
 
-[1] [Optimal Power Management for Failure Mode of MVDC Microgrids in All-Electric Ships](https://arxiv.org/abs/1712.02552)
+[1] [Optimal Power Management for Failure Mode of MVDC Microgrids in All-Electric Ships](https://ieeexplore.ieee.org/document/8466001)
 
